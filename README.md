@@ -19,7 +19,7 @@ Here's how it works:
 
 Your PR comment thread is a high-level view of the important turning points and the plots that support your conclusions.
 
-Claude's detailed descriptions of how each plot was made are hidden inside of "🤖 Extra details 🤖" blocks that you can expand if necessary. The code that generated the plots and the full text of your Claude conversation are checked into git for later forensics, but not the high-level view. (If your repo is public, be careful what you say to Claude!)
+Claude's detailed descriptions of how each plot was made are hidden inside of `🤖 Extra details 🤖` blocks that you can expand if necessary. The code that generated the plots and the full text of your Claude conversation are checked into git for later forensics, but not the high-level view. (If your repo is public, be careful what you say to Claude!)
 
 The tool will recover if you manually push or add your own commits or comments. It doesn't try to be the only tool you use.
 
@@ -48,7 +48,7 @@ Browsing recent plot images in one thread (`A`):
 
 ![](img/screenshot-browse.png)
 
-Drafting a GitHub comment (click to add plots and edit or copy from the "🤖 Extra details 🤖" block):
+Drafting a GitHub comment (click to add plots and edit or copy from the `🤖 Extra details 🤖` block):
 
 ![](img/screenshot-draft.png)
 
@@ -79,13 +79,13 @@ Only `/plotbook:start` is required.
 
 ## Customizing
 
-- Extra-details prompt: copy `templates/addendum-prompt.md` to `~/.config/plotbook/addendum-prompt.md` and edit it. `PLOTBOOK_ADDENDUM_MODEL` selects the model (default `sonnet`).
-- Viewer by hand: `uv run --script <plugin>/server/viewer.py --root <analysis-dir>`.
+- To change the prompt that generates the `🤖 Extra details 🤖` text: copy `templates/addendum-prompt.md` to `~/.config/plotbook/addendum-prompt.md` and edit it. `PLOTBOOK_ADDENDUM_MODEL` selects the model (default `sonnet`).
+- To run the viewer outside of Claude: `uv run --script <plugin>/server/viewer.py --root <analysis-dir>`.
 
 ## When something breaks
 
-- `TRANSCRIPT-SYNC-BROKEN` appears in the analysis root: Claude Code changed its internal transcript format. Your files are still committed. Add the new entry type to the table at the top of `scripts/sync_transcript.py`. The next sync recovers the full transcript and removes the marker.
-- "thread … is already claimed": another live session owns it. If that session crashed, use `/plotbook:start <thread> --steal`.
+- If `TRANSCRIPT-SYNC-BROKEN` appears in the analysis root: Claude Code changed its internal transcript format. Your files are still committed. Add the new entry type to the table at the top of `scripts/sync_transcript.py`. The next sync recovers the full transcript and removes the marker.
+- If you see "thread … is already claimed": another live session owns it. If that session crashed, use `/plotbook:start <thread> --steal`.
 
 ## Development
 
@@ -119,4 +119,4 @@ python3 -m pytest tests/
 
 before submitting your improvements to the plugin.
 
-PRs are welcome!
+Contributions are welcome as issues or pull requests!
