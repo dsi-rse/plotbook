@@ -1,0 +1,9 @@
+{
+  "name": "plotbook",
+  "version": "0.1.0",
+  "description": "Use a directory + git branch + GitHub PR as a scientific lab notebook for exploratory data analysis: numbered WET plot scripts, SVG outputs, per-turn commits, transcripts in git, a local viewer, and human-written PR comments.",
+  "author": {"name": "Jim Pivarski"},
+  "repository": "https://github.com/dsi-rse/plotbook",
+  "license": "BSD-3-Clause",
+  "keywords": ["data-analysis", "notebook", "matplotlib", "github"]
+}

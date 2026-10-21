@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard.sh\" turn_start.py", "timeout": 30}]}
+    ],
+    "PreToolUse": [
+      {"matcher": "Write|Edit|MultiEdit|NotebookEdit",
+       "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard.sh\" immutability_guard.py", "timeout": 15}]}
+    ],
+    "PostToolUse": [
+      {"matcher": "Write|Edit|MultiEdit|NotebookEdit",
+       "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard.sh\" journal.py", "timeout": 15}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard.sh\" turn_commit.py", "timeout": 120}]}
+    ],
+    "PreCompact": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard.sh\" sync_transcript.py", "timeout": 120}]}
+    ],
+    "SessionEnd": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/guard.sh\" sync_transcript.py", "timeout": 120}]}
+    ]
+  }
+}

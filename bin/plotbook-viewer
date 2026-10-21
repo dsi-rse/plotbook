@@ -1,0 +1,4 @@
+#!/bin/sh
+# plotbook CLI shim (plugin bin/ is on the Bash tool's PATH).
+here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+exec python3 "$here/scripts/claim_thread.py" viewer "$@"

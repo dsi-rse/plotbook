@@ -1,0 +1,7 @@
+{
+  "name": "plotbook",
+  "owner": {"name": "UChicago DSI Research Software Engineering"},
+  "plugins": [
+    {"name": "plotbook", "source": "./", "description": "A directory + git branch + GitHub PR as a scientific lab notebook for exploratory data analysis."}
+  ]
+}
