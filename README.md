@@ -72,7 +72,7 @@ You can use code from other directories, but the plotting scripts in this direct
 ## More commands
 
 * `/plotbook:start A` for some label like `A`, `B`, `C`: sets up the subdirectories and tells Claude to adhere to the filename convention.
-* `/plotbook:push` starts a draft comment in the web viewer; equivalent to the green button in the web viewer.
+* `/plotbook:push` starts a draft comment in the web viewer; equivalent to the "Draft comment" button in the web viewer.
 * `/plotbook:repro A0003` reproduces a plot whose prefix is `A0003`.
 
 Only `/plotbook:start` is required.
