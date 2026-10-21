@@ -6,8 +6,10 @@ Called from turn_start.py when the user types `/plotbook:start <thread>`.
 """
 
 import fcntl
+import glob
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -102,8 +104,11 @@ def _probe(port, root):
         return False
 
 
-def _is_viewer_pid(pid):
-    """True if `pid` is alive and is (a uv wrapper of) plotbook's viewer.py -- e.g. still starting."""
+def _is_viewer_pid(pid, root=None):
+    """True if `pid` is alive and is (a uv wrapper of) plotbook's viewer.py -- e.g. still starting.
+
+    With `root`, it must also be the viewer for that analysis.
+    """
     if not pbcore.pid_alive(pid):
         return False
     try:
@@ -115,15 +120,20 @@ def _is_viewer_pid(pid):
                                   timeout=5).stdout
         except (OSError, subprocess.SubprocessError):
             return False
-    return "viewer.py" in args
+    return "viewer.py" in args and (root is None or os.path.realpath(root) in args)
 
 
-def _free_port():
-    s = socket.socket()
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
+def _free_port(prefer=None):
+    """`prefer` (the viewer's previous port, so open browser tabs reconnect) if free, else any."""
+    for port in ([prefer] if prefer else []) + [0]:
+        s = socket.socket()
+        try:
+            s.bind(("127.0.0.1", port))
+            return s.getsockname()[1]
+        except OSError:
+            continue
+        finally:
+            s.close()
 
 
 def ensure_viewer(root):
@@ -140,7 +150,7 @@ def ensure_viewer(root):
         if uv is None:
             return None, ("viewer not started: `uv` is not installed (https://docs.astral.sh/uv/). "
                           "Everything still works; browse plots/ with any file manager.")
-        port = _free_port()
+        port = _free_port(info.get("port"))
         log = open(pbcore.state_dir(root, "viewer.log"), "ab")
         proc = subprocess.Popen(
             [uv, "run", "--quiet", "--script", os.path.join(PLUGIN_ROOT, "server", "viewer.py"),
@@ -149,6 +159,32 @@ def ensure_viewer(root):
             env=dict(os.environ, PLOTBOOK_PLUGIN_ROOT=PLUGIN_ROOT))
         pbcore.write_json(info_path, {"pid": proc.pid, "port": port, "started": pbcore.now_iso()})
         return "http://127.0.0.1:%d" % port, "viewer starting (first start may take a few seconds while uv fetches dependencies)"
+    finally:
+        os.close(lock_fd)
+
+
+def stop_viewer(root, ending_session):
+    """Stop this analysis's viewer unless a session other than `ending_session` is still live here.
+
+    The viewer serves every thread of the analysis, so it lives as long as any claimed session.
+    Only the viewer process is signalled: a publish it launched runs to completion on its own.
+    Returns True if a viewer was stopped.
+    """
+    for path in glob.glob(pbcore.state_dir(root, "claims", "*.json")):
+        c = pbcore.read_json(path) or {}
+        if c.get("session_id") != ending_session and pbcore.pid_alive(c.get("claude_pid")):
+            return False
+    lock_fd = os.open(pbcore.state_dir(root, "viewer.lock"), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        pid = (pbcore.read_json(pbcore.state_dir(root, "viewer.json")) or {}).get("pid")
+        if not _is_viewer_pid(pid, root):
+            return False
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            return False
+        return True
     finally:
         os.close(lock_fd)
 

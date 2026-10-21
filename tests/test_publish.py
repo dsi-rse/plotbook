@@ -218,3 +218,13 @@ def test_published_throughs_per_thread(tmp_path):
     (root / ".plotbook" / "published.jsonl").write_text("".join(json.dumps(r) + "\n" for r in recs))
     assert pbcore.published_throughs(str(root), "A") == [1, 3, 5]
     assert pbcore.last_through(str(root), "A") == 5 and pbcore.last_through(str(root), "C") == 0
+
+
+def test_publish_finishes_when_viewer_goes_away(published_env):
+    s, remote, tmp = published_env
+    write_state(s, "Hello\n", "")
+    proc = subprocess.Popen([sys.executable, os.path.join(SCRIPTS, "publish.py"), "--root", s.root, "--thread", "primary"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    proc.stdout.close()  # the reader (the viewer) is gone before the first log line
+    assert proc.wait(timeout=60) == 0
+    assert len(pbcore.published(s.root)) == 1

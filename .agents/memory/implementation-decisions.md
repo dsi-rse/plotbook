@@ -22,6 +22,12 @@
   so the user's edits are never clobbered. Publishing archives the draft and addendum to `state/archive/` and deletes the meta.
 - **Viewer**: Starlette + uvicorn + watchfiles + cairosvg + markdown-it-py via uv inline metadata. Thumbnails are
   browser-rendered SVG. publish.py runs under the viewer's interpreter, so cairosvg is normally available.
+- **Viewer lifetime** (user request): one viewer per analysis (all threads). SessionEnd (sync_transcript.py,
+  before the slow sync) calls claim_thread.stop_viewer: SIGTERM the viewer.json pid only if it is this root's viewer
+  and no *other* claim has a live claude_pid. Every claimed prompt calls ensure_viewer (cheap /health probe), which
+  restarts it after resume/crash, preferring the old port. Also fires on /clear (reason "clear"); /plotbook:start revives it.
+  A running publish survives: the viewer launches it with Popen(start_new_session) + a daemon reader thread, and
+  publish.emit() swallows BrokenPipe.
 - **Plot-script cwd guard** (deviation from the spec): from `scripts/`, the canonical exec line fails with FileNotFoundError
   before shared_0000's guard can run. Plot scripts therefore carry a one-line `if not os.path.isdir("plots"): sys.exit(...)`
   before the exec line (conventions skill header template). shared_0000 keeps its guard too.

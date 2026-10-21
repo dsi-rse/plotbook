@@ -26,3 +26,8 @@
 - The template sets font.family="sans-serif" + font.sans-serif=["DejaVu Sans"], so SVG text is
   `font-family: 'DejaVu Sans', sans-serif` (a plain fallback where DejaVu is missing, e.g. browsers on macOS).
   Mathtext still emits 'DejaVu Sans' with oblique for math variables (correct).
+- asyncio subprocesses are killed when their event loop shuts down (transport close()), so a job that
+  must outlive the viewer can't use asyncio.create_subprocess_exec. Use Popen + a daemon thread instead.
+- Delta allocation with open(path, "x") followed by a write raced against a concurrent allocator's delta_tree()
+  check, which saw an empty file and raised malformed (a flaky test_concurrent_allocation_is_distinct under load).
+  Fixed: write a temp file, then os.link() it into place (atomic and fails if the name exists).

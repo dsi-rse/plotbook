@@ -37,6 +37,8 @@ It therefore works with `"deny": ["Bash(git *)", "Bash(gh *)"]` in your settings
 4. Ask for plots. Each turn that makes or changes files ends in a commit like `[primary0003–primary0004] split by island`.
 5. For a side question, open another Claude Code session in the same directory and run `/plotbook:start tangent`.
    Threads are independent, numbered sequences, each with its own viewer tab.
+   One viewer serves every thread of the analysis. It stops when the last Claude Code session there ends,
+   and a resumed session restarts it on the same port, so an open tab reconnects.
 6. `/plotbook:push` opens the draft view. Write your comment there, and click thumbnails to insert plots
    at the cursor. Edit the prefilled Extra-details pane (empty it to omit the block), then press **Publish**.
    This makes one commit (any pending work plus the PNG previews), pushes, and posts the comment. Images are pinned to the pushed commit and

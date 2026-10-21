@@ -1,5 +1,7 @@
 import json
 import os
+import subprocess
+import sys
 import threading
 
 from conftest import commits, git
@@ -261,3 +263,31 @@ def test_backstop_sessionend_releases(new_session, repo):
     # Resuming the same session re-claims its thread.
     r = s.prompt("resumed")
     assert "thread=primary" in r.stdout
+
+
+def _fake_viewer(root):
+    """A process that looks like `uv run ... viewer.py --root <root>` to claim_thread."""
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", "viewer.py", "--root",
+                             os.path.realpath(root)])
+
+
+def test_sessionend_stops_viewer_after_last_live_session(new_session, tmp_path):
+    a, b = new_session(), new_session()
+    a.prompt("/plotbook:start primary")
+    b.prompt("/plotbook:start tangent")
+    viewer = _fake_viewer(a.root)
+    other = _fake_viewer(tmp_path)  # another analysis's viewer: never touched
+    try:
+        pbcore.write_json(pbcore.state_dir(a.root, "viewer.json"), {"pid": viewer.pid, "port": 1})
+        assert a.hook("sync_transcript.py", hook_event_name="SessionEnd").returncode == 0
+        assert viewer.poll() is None  # tangent's session is still live
+        assert b.hook("sync_transcript.py", hook_event_name="SessionEnd").returncode == 0
+        assert viewer.wait(timeout=5) != 0 and other.poll() is None
+    finally:
+        for p in (viewer, other):
+            p.kill()
+            p.wait()
+    # Resuming brings the viewer back (here: reports why it can't, since tests hide `uv`).
+    r = a.prompt("resumed")
+    assert "thread=primary" in r.stdout and "viewer not started" in r.stdout
+    assert "viewer not started" not in a.prompt("again").stdout

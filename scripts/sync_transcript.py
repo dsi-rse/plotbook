@@ -7,7 +7,8 @@ failure (exit 1 + TRANSCRIPT-SYNC-BROKEN marker at the analysis root). Fix by ad
 new type to the table. Unknown *fields* on known types are ignored.
 
 As a hook (PreCompact / SessionEnd backstop) it only syncs; the thread's next commit
-(a file-changing turn or a publish) carries the transcript.
+(a file-changing turn or a publish) carries the transcript. At SessionEnd it also releases
+the claim and stops the viewer if no other live session is using this analysis.
 """
 
 import json
@@ -17,6 +18,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import claim_thread  # noqa: E402
 import pbcore  # noqa: E402
 
 FORMAT_VERSION = 1
@@ -220,7 +222,7 @@ def sync(root, thread, session_id, source, last_assistant_message=None):
 
 
 def main():
-    """Hook entry point for PreCompact and SessionEnd: sync (no commit); release the claim at end."""
+    """Hook entry point for PreCompact and SessionEnd: sync (no commit); at end, release and stop the viewer."""
     inp = pbcore.hook_input()
     root = pbcore.hook_root(inp)
     sid = inp.get("session_id")
@@ -229,6 +231,9 @@ def main():
     thread = pbcore.session_thread(root, sid)
     if thread is None:
         return 0
+    if inp.get("hook_event_name") == "SessionEnd":
+        # Cheap and first: Claude Code may not wait long for SessionEnd hooks while exiting.
+        claim_thread.stop_viewer(root, sid)
     status = 0
     try:
         sync(root, thread, sid, inp.get("transcript_path"))

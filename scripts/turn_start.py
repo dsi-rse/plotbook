@@ -76,12 +76,21 @@ def main():
     sid = inp.get("session_id")
     if root is None or not sid:
         return 0
-    thread = pbcore.session_thread(root, sid) or claim_thread.reclaim_on_resume(root, sid)
+    thread = pbcore.session_thread(root, sid)
+    resumed = thread is None
+    if resumed:
+        thread = claim_thread.reclaim_on_resume(root, sid)
     if thread is None:
         print("[plotbook] This session has not claimed a thread in analysis %s; nothing will be committed. "
               "The user can run /plotbook:start <thread> to begin." % root)
         return 0
     record_prompt(root, sid, prompt)
+    # The viewer stops when the last session here ends; bring it back for a resumed session (or after a crash).
+    url, note = claim_thread.ensure_viewer(root)
+    if url and (note or resumed):
+        print("[plotbook] Viewer: %s/t/%s" % (url, thread) + (" (%s)" % note if note else ""))
+    elif note and resumed:
+        print("[plotbook] %s" % note)
     print(context_line(root, thread))
     return 0
 

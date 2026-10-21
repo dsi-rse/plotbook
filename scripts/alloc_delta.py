@@ -2,8 +2,9 @@
 
 usage: plotbook-delta --thread T --parent NNNN
 
-Numbers are global across threads; allocation is atomic via open(..., "x") and
-rolls forward past numbers other sessions claimed concurrently.
+Numbers are global across threads; allocation is atomic (hard-link of a fully written temp
+file, which fails if the name exists) and rolls forward past numbers other sessions claimed
+concurrently.
 """
 
 import argparse
@@ -22,14 +23,21 @@ def allocate(root, thread, parent):
     pbcore.delta_tree(root)  # loud failure if the existing tree is malformed
     existing = [int(m.group(1)) for m in (pbcore.DELTA_NAME_RE.match(n) for n in os.listdir(scripts)) if m]
     m = max(existing, default=-1) + 1
-    while True:
-        path = os.path.join(scripts, "shared_%04d.py" % m)
-        try:
-            with open(path, "x") as f:
-                f.write(pbcore.canonical_exec_line(parent) + "\n")
-            break
-        except FileExistsError:
-            m += 1
+    # Write a private temp file, then hard-link it into place: the link fails if the name is
+    # taken (atomic claim, like open(..., "x")), and the file never appears without its first
+    # line, so a concurrent allocator's delta_tree() check can't see it empty.
+    tmp = os.path.join(scripts, ".shared-alloc-%d.tmp" % os.getpid())
+    with open(tmp, "w") as f:
+        f.write(pbcore.canonical_exec_line(parent) + "\n")
+    try:
+        while True:
+            try:
+                os.link(tmp, os.path.join(scripts, "shared_%04d.py" % m))
+                break
+            except FileExistsError:
+                m += 1
+    finally:
+        os.remove(tmp)
     pbcore.append_jsonl(pbcore.state_dir(root, "deltas.jsonl"),
                         {"m": m, "parent": parent, "thread": thread, "ts": pbcore.now_iso()})
     return m, os.path.join("scripts", "shared_%04d.py" % m)

@@ -34,8 +34,17 @@ class PublishError(Exception):
     pass
 
 
+def emit(rec):
+    """One JSON log line for the viewer. If the viewer has gone away, carry on silently."""
+    try:
+        print(json.dumps(rec), flush=True)
+    except (BrokenPipeError, ValueError):
+        devnull = open(os.devnull, "w")
+        sys.stdout = sys.stderr = devnull
+
+
 def log(step, msg):
-    print(json.dumps({"step": step, "msg": msg}), flush=True)
+    emit({"step": step, "msg": msg})
 
 
 def run(args, cwd, timeout=120):
@@ -371,7 +380,7 @@ def publish(root, thread):
     for leftover in (p["progress"], pbcore.state_dir(root, "addendum-%s.meta.json" % thread)):
         if os.path.exists(leftover):
             os.remove(leftover)
-    print(json.dumps({"done": True, "url": rec["comment_url"]}), flush=True)
+    emit({"done": True, "url": rec["comment_url"]})
 
 
 def main():
@@ -394,7 +403,7 @@ def main():
         if args.plan:
             print(json.dumps({"error": str(err)}))
         else:
-            print(json.dumps({"error": str(err)}), flush=True)
+            emit({"error": str(err)})
         return 1
     return 0
 

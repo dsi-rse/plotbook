@@ -23,6 +23,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 
 from starlette.applications import Starlette
@@ -310,18 +311,34 @@ def publish_cmd(t, *extra):
     return [sys.executable, os.path.join(PLUGIN_ROOT, "scripts", "publish.py"), "--root", ROOT, "--thread", t, *extra]
 
 
+def _publish_line(t, raw):
+    line = raw.decode().rstrip("\n")
+    try:
+        rec = json.loads(line)
+    except ValueError:
+        rec = {"step": "output", "msg": line}
+    HUB.send({"type": "publish", "thread": t, "log": rec})
+
+
 async def run_publish(t):
     HUB.send({"type": "publish", "thread": t, "log": {"step": "start", "msg": "publishing"}})
-    proc = await asyncio.create_subprocess_exec(*publish_cmd(t), stdout=asyncio.subprocess.PIPE,
-                                                stderr=asyncio.subprocess.STDOUT)
-    async for raw in proc.stdout:
-        line = raw.decode().rstrip("\n")
+    # A plain detached process read by a daemon thread, not an asyncio subprocess: asyncio kills
+    # its children when the viewer shuts down (e.g. at SessionEnd), and a publish must finish.
+    loop = asyncio.get_running_loop()
+    finished = loop.create_future()
+    proc = subprocess.Popen(publish_cmd(t), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, start_new_session=True)
+
+    def pump():
         try:
-            rec = json.loads(line)
-        except ValueError:
-            rec = {"step": "output", "msg": line}
-        HUB.send({"type": "publish", "thread": t, "log": rec})
-    code = await proc.wait()
+            for raw in proc.stdout:
+                loop.call_soon_threadsafe(_publish_line, t, raw)
+            loop.call_soon_threadsafe(finished.set_result, proc.wait())
+        except RuntimeError:  # the viewer's loop is gone; the publish carries on without it
+            pass
+
+    threading.Thread(target=pump, daemon=True).start()
+    code = await finished
     if code != 0:
         HUB.send({"type": "publish", "thread": t, "log": {"error": "publish exited with status %d" % code}})
 
