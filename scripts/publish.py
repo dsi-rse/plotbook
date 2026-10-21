@@ -85,6 +85,50 @@ def branch_and_remote(root):
     return branch, remote, dest
 
 
+FONTS_CONF = """<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<!-- plotbook: render previews with matplotlib's bundled fonts only (the files it laid the text out with) -->
+<fontconfig>
+  <dir>%(fonts)s</dir>
+  <cachedir>%(cache)s</cachedir>
+  <alias><family>sans-serif</family><prefer><family>DejaVu Sans</family></prefer></alias>
+  <alias><family>serif</family><prefer><family>DejaVu Serif</family></prefer></alias>
+  <alias><family>monospace</family><prefer><family>DejaVu Sans Mono</family></prefer></alias>
+  <!-- any other family (e.g. Helvetica) falls back to DejaVu Sans, not matplotlib's box-drawing LastResort -->
+  <match target="pattern"><edit name="family" mode="append_last"><string>DejaVu Sans</string></edit></match>
+</fontconfig>
+"""
+
+
+def isolate_fonts(root):
+    """Make every SVG→PNG converter resolve fonts from matplotlib's bundled set, not the system's.
+
+    System font setups differ (and can be broken: a conda fontconfig that misreads .woff files
+    resolved "DejaVu Sans" to an italic Garamond). Must run before cairosvg/cairo is loaded;
+    rsvg-convert and Inkscape inherit it through FONTCONFIG_FILE. Returns the fonts dir or None.
+    """
+    from xml.sax.saxutils import escape
+
+    data = None
+    for py in ("python3", "python"):
+        exe = shutil.which(py)
+        if exe:
+            cp = subprocess.run([exe, "-c", "import matplotlib; print(matplotlib.get_data_path())"],
+                                capture_output=True, text=True, timeout=60)
+            if cp.returncode == 0 and cp.stdout.strip():
+                data = cp.stdout.strip()
+                break
+    fonts = os.path.join(data, "fonts", "ttf") if data else None
+    if not fonts or not os.path.isdir(fonts):
+        return None
+    conf_dir = pbcore.ensure_dir(pbcore.state_dir(root, "fontconfig"))
+    conf = os.path.join(conf_dir, "fonts.conf")
+    with open(conf, "w") as f:
+        f.write(FONTS_CONF % {"fonts": escape(fonts), "cache": escape(os.path.join(conf_dir, "cache"))})
+    os.environ["FONTCONFIG_FILE"] = conf
+    return fonts
+
+
 def converter():
     try:
         import cairosvg  # noqa: F401
@@ -266,10 +310,11 @@ def publish(root, thread):
                                    "rsvg-convert (librsvg), or Inkscape; then publish again.")
             for rel in svgs:
                 src, dst = os.path.join(root, rel), os.path.join(root, preview_rel(rel))
-                if not (os.path.exists(dst) and os.path.getmtime(dst) >= os.path.getmtime(src)):
-                    pbcore.ensure_dir(os.path.dirname(dst))
-                    render_png(src, dst, conv)
-                    log("previews", "rendered %s (%s)" % (preview_rel(rel), conv))
+                # Always re-render (cheap, deterministic): a preview from an older renderer or font
+                # setup must not be reused; unchanged output makes no diff.
+                pbcore.ensure_dir(os.path.dirname(dst))
+                render_png(src, dst, conv)
+                log("previews", "rendered %s (%s)" % (preview_rel(rel), conv))
                 previews.append(preview_rel(rel))
 
         # One commit per publish: the thread's pending work (files, transcripts, the previous
@@ -339,6 +384,8 @@ def main():
     try:
         if root is None:
             raise PublishError("not a plotbook analysis: %s" % args.root)
+        if isolate_fonts(root) is None and not args.plan:
+            log("previews", "matplotlib not found; previews use the system's fonts")
         if args.plan:
             print(json.dumps(plan(root, args.thread)))
         else:

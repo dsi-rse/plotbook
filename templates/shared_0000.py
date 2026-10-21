@@ -14,10 +14,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# Keep SVG text as <text> elements (editable in Inkscape) in a widely available font,
-# and make output deterministic so reproductions can be diffed.
+# Keep SVG text as <text> elements (editable in Inkscape) in a plain font: DejaVu Sans (bundled
+# with matplotlib), written as `font-family: 'DejaVu Sans', sans-serif` so viewers without it fall
+# back to their own plain sans-serif. Make output deterministic so reproductions can be diffed.
 plt.rcParams["svg.fonttype"] = "none"
-plt.rcParams["font.family"] = "DejaVu Sans"
+plt.rcParams["font.family"] = "sans-serif"
+plt.rcParams["font.sans-serif"] = ["DejaVu Sans"]
 plt.rcParams["svg.hashsalt"] = "plotbook"
 
 

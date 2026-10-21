@@ -16,3 +16,13 @@
   below the thumbnails instead of clipping their labels.
 - Strip wheel handling: vertical-dominant wheel events are converted to horizontal scrolling (preventDefault,
   passive:false). Horizontal-dominant ones (trackpad, tilt wheel, Shift+wheel) are left native, and so is Ctrl+wheel (zoom).
+- Italic PNG previews: uv built the viewer env on miniforge's Python, so cairosvg loaded miniforge's
+  libcairo/libfontconfig. That fontconfig misreads the system's EB Garamond .woff files and resolved
+  "DejaVu Sans" to EBGaramond08-Italic. The fix (publish.isolate_fonts) points FONTCONFIG_FILE at a generated
+  fonts.conf containing only matplotlib's mpl-data/fonts/ttf, with a DejaVu Sans fallback for every family
+  (otherwise unknown families hit matplotlib's box-drawing LastResort font). It applies to cairosvg, rsvg-convert,
+  and Inkscape, and must be set before cairosvg is imported. Previews are always re-rendered so stale ones aren't reused.
+  Debug with: FONTCONFIG_FILE=<conf> fc-match 'DejaVu Sans'.
+- The template sets font.family="sans-serif" + font.sans-serif=["DejaVu Sans"], so SVG text is
+  `font-family: 'DejaVu Sans', sans-serif` (a plain fallback where DejaVu is missing, e.g. browsers on macOS).
+  Mathtext still emits 'DejaVu Sans' with oblique for math variables (correct).
