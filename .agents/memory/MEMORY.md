@@ -14,4 +14,5 @@ Read this at session start. Open linked files only when relevant to the current 
 - [gotchas.md](gotchas.md): viewer/GitHub-markdown/test pitfalls hit during the build.
 
 ## User preferences
+- [dev-workflow.md](dev-workflow.md): the user runs plotbook live via --plugin-dir from this working copy; what needs reload/restart.
 - The user chose: the divider goes after the newest *existing* artifact; live GitHub tests on jpivarski/penguin-science (private), with confirmation before pushing or commenting.

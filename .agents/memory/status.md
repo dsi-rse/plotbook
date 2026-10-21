@@ -9,6 +9,6 @@ Verified end to end with headless `claude -p --plugin-dir` sessions under `deny 
 Pending:
 - live GitHub run on jpivarski/penguin-science (private), acceptance checks 5–7 and 9. Confirm with the user before
   the first push/comment there; the user does the squash-merge and branch deletion for check 7;
-- mermaid preview fix (highlight-source-mermaid), not yet re-checked in the browser;
+- (mermaid preview fix verified in the browser; included in "first implementation")
 - the external entry snippet for the dsi-rse/skills marketplace (the user applies it);
 - UI polish later (the spec expects iteration).
