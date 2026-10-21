@@ -304,17 +304,6 @@ def publish_cmd(t, *extra):
     return [sys.executable, os.path.join(PLUGIN_ROOT, "scripts", "publish.py"), "--root", ROOT, "--thread", t, *extra]
 
 
-async def api_publish_plan(request):
-    t = request.path_params["thread"]
-    if not thread_ok(t):
-        return Response(status_code=404)
-    cp = await asyncio.to_thread(subprocess.run, publish_cmd(t, "--plan"), capture_output=True, text=True, timeout=60)
-    try:
-        return JSONResponse(json.loads(cp.stdout))
-    except ValueError:
-        return JSONResponse({"error": (cp.stderr or cp.stdout or "publish --plan failed").strip()})
-
-
 async def run_publish(t):
     HUB.send({"type": "publish", "thread": t, "log": {"step": "start", "msg": "publishing"}})
     proc = await asyncio.create_subprocess_exec(*publish_cmd(t), stdout=asyncio.subprocess.PIPE,
@@ -495,7 +484,7 @@ refresh(true);
 
 DRAFT_HTML = """
 <header><h1>plotbook · __THREAD__ · draft comment</h1><span class="path" id="path"></span><a id="pr" target="_blank"></a>
-<a href="/t/__THREAD__">back to thread</a><button class="primary" id="publish">Publish…</button></header>
+<a href="/t/__THREAD__">back to thread</a><button class="primary" id="publish">Publish</button></header>
 <div class="draft">
   <div class="pane"><h2>Your comment (markdown) <span class="status" id="saved"></span></h2>
     <textarea id="draft" placeholder="Write the narrative here. Click a thumbnail below to insert that plot at the cursor."></textarea></div>
@@ -505,9 +494,7 @@ DRAFT_HTML = """
     <textarea id="addendum" placeholder="(generating…)"></textarea></div>
   <div class="tray"><div class="strip" id="tray"></div></div>
 </div>
-<dialog id="confirm"><h3>Publish this comment?</h3><div id="plan"></div>
-  <p><button id="cancel">Cancel</button> <button class="primary" id="go">Publish</button></p></dialog>
-<dialog id="logdlg"><h3>Publishing…</h3><pre id="log"></pre><p id="result"></p><p><button id="closelog">Close</button></p></dialog>
+<dialog id="logdlg"><h3 id="logtitle">Publishing…</h3><pre id="log"></pre><p id="result"></p><p><button id="closelog" disabled>OK</button></p></dialog>
 <script>const THREAD = "__THREAD__";</script>
 <script>window.MathJax = { tex: { inlineMath: [['$','$']], displayMath: [['$$','$$']] }, startup: { typeset: false } };</script>
 <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
@@ -575,34 +562,32 @@ document.getElementById("regen").onclick = async () => {
   if (r.text.trim() && r.meta.edited && !confirm("Replace your edited Extra-details text with a fresh generation?")) return;
   generate();
 };
-const confirmDlg = document.getElementById("confirm"), logDlg = document.getElementById("logdlg");
-document.getElementById("publish").onclick = async () => {
-  await save("draft", draft.value); await save("addendum", addendum.value);
-  const plan = await (await fetch(`/api/publish/${THREAD}/plan`)).json();
-  const el = document.getElementById("plan");
-  if (plan.error) { el.innerHTML = `<p style="color:#cf222e">${esc(plan.error)}</p>`; document.getElementById("go").disabled = true; }
-  else {
-    document.getElementById("go").disabled = false;
-    el.innerHTML = `<p>Comment on <a href="${esc(plan.pr.url)}" target="_blank">PR #${plan.pr.number}</a> (${esc(plan.pr.repo)}, ${esc(plan.visibility)}).</p>
-      <p><b>Commit</b> pending work of thread ${esc(THREAD)}: ${plan.pending.length ? plan.pending.map(esc).join(", ") : "nothing"}</p>
-      <p><b>Convert</b> to PNG previews (${esc(plan.converter || "NO CONVERTER FOUND")}): ${plan.images.map(esc).join(", ") || "none"}</p>
-      <p><b>Link</b> other artifacts: ${plan.links.map(esc).join(", ") || "none"}</p>
-      <p><b>Push</b> branch <code>${esc(plan.branch)}</code> to <code>${esc(plan.remote)}</code>, pin links to the pushed commit.</p>
-      <p><b>Extra details</b>: ${plan.addendum ? "included (collapsed)" : "omitted (pane is empty)"}</p>
-      ${plan.missing.length ? `<p style="color:#cf222e">Missing files referenced in the draft: ${plan.missing.map(esc).join(", ")}</p>` : ""}
-      ${plan.warnings.map(w => `<p style="color:#9a6700">${esc(w)}</p>`).join("")}`;
-    if (!plan.converter && plan.images.length || plan.missing.length) document.getElementById("go").disabled = true;
-  }
-  confirmDlg.showModal();
-};
-document.getElementById("cancel").onclick = () => confirmDlg.close();
-document.getElementById("closelog").onclick = () => logDlg.close();
-document.getElementById("go").onclick = async () => {
-  confirmDlg.close(); document.getElementById("log").textContent = ""; document.getElementById("result").textContent = "";
+// Publish runs immediately (no confirmation). The progress dialog's OK returns to the thread
+// view after a successful publish, or back to the draft after a failure so it can be fixed.
+const logDlg = document.getElementById("logdlg"), publishBtn = document.getElementById("publish"), okBtn = document.getElementById("closelog");
+let publishState = "idle";  // idle | running | done | failed
+function finishPublish(state, title, resultHtml) {
+  publishState = state;
+  document.getElementById("logtitle").textContent = title;
+  document.getElementById("result").innerHTML = resultHtml;
+  okBtn.disabled = false; okBtn.focus();
+}
+publishBtn.onclick = async () => {
+  if (publishState === "running") return;
+  publishState = "running"; publishBtn.disabled = true; okBtn.disabled = true;
+  document.getElementById("logtitle").textContent = "Publishing…";
+  document.getElementById("log").textContent = ""; document.getElementById("result").textContent = "";
   logDlg.showModal();
+  await save("draft", draft.value); await save("addendum", addendum.value);
   const r = await (await fetch(`/api/publish/${THREAD}/run`, {method: "POST"})).json();
-  if (r.error) document.getElementById("result").textContent = r.error;
+  if (r.error) finishPublish("failed", "Publish failed", `<b style="color:#cf222e">${esc(r.error)}</b>`);
 };
+logDlg.addEventListener("cancel", e => { if (publishState === "running") e.preventDefault(); });  // Esc mid-publish
+logDlg.addEventListener("close", () => {
+  if (publishState === "done") { location.href = `/t/${THREAD}`; return; }
+  publishState = "idle"; publishBtn.disabled = false;
+});
+okBtn.onclick = () => logDlg.close();
 onEvents(async ev => {
   if (ev.type === "plots" && ev.threads.includes(THREAD)) refreshTray();
   if (ev.type === "published") refreshTray();
@@ -613,11 +598,11 @@ onEvents(async ev => {
   if (ev.type === "publish" && ev.thread === THREAD) {
     const l = ev.log, log = document.getElementById("log");
     if (l.msg) log.textContent += (l.step ? `[${l.step}] ` : "") + l.msg + "\n";
-    if (l.error) { log.textContent += "ERROR: " + l.error + "\n"; document.getElementById("result").innerHTML = '<b style="color:#cf222e">Publish failed.</b> Nothing is lost; fix the problem and press Publish again.'; }
-    if (l.done) {
-      document.getElementById("result").innerHTML = `✅ Published: <a href="${esc(l.url)}" target="_blank">${esc(l.url)}</a>`;
-      draft.value = ""; loadAddendum(false); renderPreview(); refreshTray();
+    if (l.error) {
+      log.textContent += "ERROR: " + l.error + "\n";
+      finishPublish("failed", "Publish failed", '<b style="color:#cf222e">Publish failed.</b> Nothing is lost; fix the problem and press Publish again.');
     }
+    if (l.done) finishPublish("done", "Published", `✅ <a href="${esc(l.url)}" target="_blank">${esc(l.url)}</a>`);
   }
 });
 (async () => {
@@ -638,7 +623,6 @@ routes = [
     Route("/api/state/{thread}", api_state),
     Route("/api/render", api_render, methods=["POST"]),
     Route("/api/addendum/{thread}/generate", api_addendum_generate, methods=["POST"]),
-    Route("/api/publish/{thread}/plan", api_publish_plan),
     Route("/api/publish/{thread}/run", api_publish_run, methods=["POST"]),
     Route("/api/{kind}/{thread}", api_text, methods=["GET", "PUT"]),
 ]
