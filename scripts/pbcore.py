@@ -365,16 +365,24 @@ def published(root):
     return read_jsonl(os.path.join(root, ".plotbook", "published.jsonl"))
 
 
-def last_through(root, thread):
-    """Highest artifact number covered by the thread's latest comment (0 if none)."""
-    best = 0
+def published_throughs(root, thread):
+    """For each of the thread's comments, in publish order, the highest artifact number it covered."""
+    out = []
     for rec in published(root):
         if rec.get("thread") == thread:
-            best = rec.get("through", 0)
-            if not best:
-                nums = [parse_artifact(a)[1] for a in rec.get("artifacts", []) if parse_artifact(a)]
-                best = max(nums, default=0)
-    return best
+            through = rec.get("through", 0)
+            if not through:  # entries written before `through` existed
+                nums = [parse_artifact(os.path.basename(a))[1] for a in rec.get("artifacts", [])
+                        if parse_artifact(os.path.basename(a))]
+                through = max(nums, default=0)
+            out.append(through)
+    return out
+
+
+def last_through(root, thread):
+    """Highest artifact number covered by the thread's latest comment (0 if none)."""
+    throughs = published_throughs(root, thread)
+    return throughs[-1] if throughs else 0
 
 
 def published_stems(root):

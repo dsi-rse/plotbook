@@ -212,13 +212,19 @@ async def draft_page(request):
     return HTMLResponse(head(t + " draft") + DRAFT_HTML.replace("__THREAD__", t) + SHARED_JS + DRAFT_JS)
 
 
+def earlier_throughs(thread):
+    """Boundaries of the thread's earlier comments (grey dividers), excluding the latest one (red)."""
+    throughs = pbcore.published_throughs(ROOT, thread)
+    return sorted({b for b in throughs[:-1] if b > 0} - {throughs[-1] if throughs else None})
+
+
 async def api_state(request):
     t = request.path_params["thread"]
     if not thread_ok(t):
         return Response(status_code=404)
     pr = await asyncio.to_thread(pr_info)
     return JSONResponse({"thread": t, "root": ROOT, "artifacts": artifact_list(t),
-                         "through": pbcore.last_through(ROOT, t), "pr": pr})
+                         "through": pbcore.last_through(ROOT, t), "earlier": earlier_throughs(t), "pr": pr})
 
 
 async def api_text(request):
@@ -361,6 +367,7 @@ main.index { padding:1em 2em; flex:1 1 auto; overflow:auto; } .path { color:var(
 .thumb.current { border-color:var(--accent); }
 .thumb .ext { width:116px; height:72px; display:flex; align-items:center; justify-content:center; font:600 13px ui-monospace, monospace; color:var(--muted); }
 .divider { flex:0 0 auto; display:flex; align-items:center; border-left:3px dashed #cf222e; margin:0 4px; padding-left:2px; }
+.divider.past { border-left-color:#afb8c1; margin:0 2px; padding-left:0; }
 .divider span { writing-mode:vertical-rl; transform:rotate(180deg); font-size:10px; line-height:1; color:#cf222e; white-space:nowrap; }
 .draft { flex:1 1 auto; min-height:0; display:grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) auto auto; gap:8px; padding:8px; }
 .draft textarea { width:100%; height:100%; font: 13px/1.5 ui-monospace, monospace; padding:8px; border:1px solid var(--line); border-radius:6px; resize:none; }
@@ -397,14 +404,20 @@ function thumbHtml(a, cls) {
   const inner = a.image ? `<img loading="lazy" src="${fileUrl(a)}" alt="${esc(a.name)}">` : `<div class="ext">.${esc(a.ext)}</div>`;
   return `<div class="thumb ${cls}" data-name="${esc(a.name)}" title="${esc(a.name)}">${inner}<div class="label">${esc(a.name)}</div></div>`;
 }
-function stripHtml(arts, through, currentName) {
-  let html = "", placed = through === 0;
-  if (through === 0 && arts.length) html += `<div class="divider"><span>nothing published</span></div>`;
+// Dividers: red dashed with a label after the latest comment's last artifact; grey dashed, unlabeled,
+// after each earlier comment's. A boundary sits before the first artifact numbered above it.
+function stripHtml(arts, through, earlier, currentName) {
+  if (!arts.length) return "";
+  if (through === 0) return `<div class="divider last"><span>nothing published</span></div>` +
+    arts.map(a => thumbHtml(a, a.name === currentName ? "current" : "")).join("");
+  const bounds = [...new Set([...(earlier || []), through])].sort((x, y) => x - y);
+  const divider = b => b === through ? `<div class="divider last"><span>last comment</span></div>` : `<div class="divider past" title="earlier comment"></div>`;
+  let html = "", i = 0;
   for (const a of arts) {
-    if (!placed && a.n > through) { html += `<div class="divider"><span>last comment</span></div>`; placed = true; }
+    while (i < bounds.length && a.n > bounds[i]) html += divider(bounds[i++]);
     html += thumbHtml(a, a.name === currentName ? "current" : "");
   }
-  if (!placed && arts.length) html += `<div class="divider"><span>last comment</span></div>`;
+  while (i < bounds.length) html += divider(bounds[i++]);
   return html;
 }
 // Thumbnail strips scroll horizontally. A vertical-only mouse wheel is turned into horizontal
@@ -436,7 +449,7 @@ function header(st) {
 
 THREAD_JS = r"""
 <script>
-let arts = [], idx = -1, through = 0;
+let arts = [], idx = -1, through = 0, earlier = [];
 function render() {
   const stage = document.getElementById("stage");
   const a = arts[idx];
@@ -456,7 +469,7 @@ function render() {
     });
   }
   const strip = document.getElementById("strip");
-  strip.innerHTML = stripHtml(arts, through, a && a.name);
+  strip.innerHTML = stripHtml(arts, through, earlier, a && a.name);
   const cur = strip.querySelector(".current"); if (cur) cur.scrollIntoView({block: "nearest", inline: "nearest"});
 }
 function go(i) { if (i >= 0 && i < arts.length) { idx = i; render(); } }
@@ -464,7 +477,7 @@ async function refresh(initial) {
   const st = await getState(); header(st);
   const atLatest = idx === arts.length - 1;
   const curName = arts[idx] && arts[idx].name;
-  arts = st.artifacts; through = st.through;
+  arts = st.artifacts; through = st.through; earlier = st.earlier;
   if (initial || atLatest) idx = arts.length - 1;                // follow live output only if already at latest
   else { const j = arts.findIndex(a => a.name === curName); idx = j >= 0 ? j : Math.min(idx, arts.length - 1); }
   render();
@@ -504,7 +517,7 @@ DRAFT_HTML = """
 DRAFT_JS = r"""
 <script>
 const draft = document.getElementById("draft"), addendum = document.getElementById("addendum");
-let arts = [], through = 0, timers = {};
+let arts = [], through = 0, earlier = [], timers = {};
 function debounce(key, ms, fn) { clearTimeout(timers[key]); timers[key] = setTimeout(fn, ms); }
 async function save(kind, text) {
   await fetch(`/api/${kind}/${THREAD}`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text})});
@@ -540,9 +553,9 @@ document.getElementById("tray").onclick = e => {
   insertAtCursor(a.image ? `<img src="plots/${a.name}" alt="${a.name}" width="600">` : `[${a.name}](plots/${a.name})`);
 };
 async function refreshTray() {
-  const st = await getState(); header(st); arts = st.artifacts; through = st.through;
-  const tray = document.getElementById("tray"); tray.innerHTML = stripHtml(arts, through, null);
-  const firstNew = tray.querySelector(".divider"); if (firstNew) firstNew.scrollIntoView({inline: "center", block: "nearest"});
+  const st = await getState(); header(st); arts = st.artifacts; through = st.through; earlier = st.earlier;
+  const tray = document.getElementById("tray"); tray.innerHTML = stripHtml(arts, through, earlier, null);
+  const firstNew = tray.querySelector(".divider.last"); if (firstNew) firstNew.scrollIntoView({inline: "center", block: "nearest"});
 }
 function addStatus(msg) { document.getElementById("addstatus").textContent = msg; }
 async function loadAddendum(autostart) {

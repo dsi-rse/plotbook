@@ -208,3 +208,13 @@ def test_one_turn_then_publish_is_two_commits(published_env, repo):
     run_publish(s)
     _, files = commits(repo)[0]
     assert files == ["analysis/.plotbook/published.jsonl"] and len(pbcore.published(s.root)) == 3
+
+
+def test_published_throughs_per_thread(tmp_path):
+    root = tmp_path / "a"
+    (root / ".plotbook").mkdir(parents=True)
+    recs = [{"thread": "A", "through": 1}, {"thread": "B", "through": 7}, {"thread": "A", "through": 3},
+            {"thread": "A", "artifacts": ["plots/A0005-x.svg", "plots/A0004-y.svg"]}]  # pre-`through` entry
+    (root / ".plotbook" / "published.jsonl").write_text("".join(json.dumps(r) + "\n" for r in recs))
+    assert pbcore.published_throughs(str(root), "A") == [1, 3, 5]
+    assert pbcore.last_through(str(root), "A") == 5 and pbcore.last_through(str(root), "C") == 0

@@ -15,6 +15,7 @@ Read this at session start. Open linked files only when relevant to the current 
 
 ## User preferences
 - Viewer: the dashed "last comment" divider alone marks new-since-last-comment; no background highlight on new thumbnails (user request).
+- Strip dividers: red dashed + "last comment" label at the latest comment; grey dashed, unlabeled, at each earlier comment (from every published.jsonl `through` for the thread).
 - Publish: no confirmation dialog; the button publishes immediately. After success, the progress dialog's OK returns to the thread view (after a failure it stays on the draft).
 - [dev-workflow.md](dev-workflow.md): the user runs plotbook live via --plugin-dir from this working copy; what needs reload/restart.
 - The user chose: the divider goes after the newest *existing* artifact; live GitHub tests on jpivarski/penguin-science (private), with confirmation before pushing or commenting.
