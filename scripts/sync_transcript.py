@@ -6,7 +6,8 @@ between releases: any entry type or content-block type not in the tables below i
 failure (exit 1 + TRANSCRIPT-SYNC-BROKEN marker at the analysis root). Fix by adding the
 new type to the table. Unknown *fields* on known types are ignored.
 
-As a hook (PreCompact / SessionEnd backstop) it also commits the transcript.
+As a hook (PreCompact / SessionEnd backstop) it only syncs; the thread's next commit
+(a file-changing turn or a publish) carries the transcript.
 """
 
 import json
@@ -219,7 +220,7 @@ def sync(root, thread, session_id, source, last_assistant_message=None):
 
 
 def main():
-    """Hook entry point for PreCompact and SessionEnd: sync, commit transcript, release at end."""
+    """Hook entry point for PreCompact and SessionEnd: sync (no commit); release the claim at end."""
     inp = pbcore.hook_input()
     root = pbcore.hook_root(inp)
     sid = inp.get("session_id")
@@ -230,14 +231,9 @@ def main():
         return 0
     status = 0
     try:
-        rel = sync(root, thread, sid, inp.get("transcript_path"))
-        pbcore.commit_paths(root, [rel], "[%s] transcript sync (%s)" % (thread, inp.get("hook_event_name", "backstop")),
-                            "session: %s\nthread: %s" % (sid, thread))
+        sync(root, thread, sid, inp.get("transcript_path"))
     except TranscriptFormatError as err:
         print("plotbook: TRANSCRIPT-SYNC-BROKEN: %s" % err, file=sys.stderr)
-        status = 1
-    except pbcore.PlotbookError as err:
-        print("plotbook: %s" % err, file=sys.stderr)
         status = 1
     if inp.get("hook_event_name") == "SessionEnd":
         claim = pbcore.read_claim(root, thread)

@@ -1,8 +1,12 @@
-"""Stop hook: sync this session's transcript and commit exactly this turn's work.
+"""Stop hook: sync this session's transcript and commit this turn's work, if it changed files.
 
 Staged paths = journaled Write/Edit paths ∪ changed artifacts with this thread's prefix
 (outputs are written by Bash-run Python and never appear in the journal) ∪ shared deltas
-this thread allocated ∪ this session's filtered transcript. Never `git add -A`.
+this thread allocated ∪ this thread's changed transcripts ∪ its uncommitted publish-manifest
+entries. Never `git add -A`.
+
+Turns that change no files (questions, `!` commands, chat) don't commit: their transcript
+lines and prompts ride along in the thread's next commit (a file-changing turn or a publish).
 
 Exit 1 (never 2: that would force Claude to keep going) with stderr on failure; files are
 committed even when the transcript filter fails.
@@ -30,9 +34,23 @@ def take_journal(root, sid):
     return pending, [r["file"] for r in pbcore.read_jsonl(pending) if r.get("file")]
 
 
+def last_user_text(root, thread, sid):
+    """Fallback prompt: the newest user message in the filtered transcript.
+
+    Needed because `!` shell commands typed by the user don't fire UserPromptSubmit.
+    """
+    for rec in reversed(pbcore.read_jsonl(os.path.join(root, pbcore.transcript_relpath(thread, sid)))):
+        if rec.get("role") == "user" and rec.get("text", "").strip():
+            return rec["text"]
+    return None
+
+
 def compose_message(root, thread, sid, paths):
     turn = pbcore.read_json(pbcore.turn_path(root, sid)) or {"prompts": []}
     prompts = [p["text"] for p in turn.get("prompts", []) if p.get("text")]
+    if not prompts:
+        fallback = last_user_text(root, thread, sid)
+        prompts = [fallback] if fallback else []
     note = None
     try:
         with open(pbcore.note_path(root, thread)) as f:
@@ -58,26 +76,31 @@ def main():
     if thread is None:
         return 0
     errors = []
-    paths = []
     try:
-        paths.append(sync_transcript.sync(root, thread, sid, inp.get("transcript_path"),
-                                          inp.get("last_assistant_message")))
+        sync_transcript.sync(root, thread, sid, inp.get("transcript_path"), inp.get("last_assistant_message"))
     except sync_transcript.TranscriptFormatError as err:
         errors.append("TRANSCRIPT-SYNC-BROKEN: %s" % err)
-        rel = pbcore.transcript_relpath(thread, sid)
-        if os.path.exists(os.path.join(root, rel)):
-            paths.append(rel)  # keep committing whatever was synced before the break (unchanged)
     pending, journaled = take_journal(root, sid)
-    paths = pbcore.confine(root, journaled + pbcore.thread_owned_changes(root, thread) + paths)
-    subject, body = compose_message(root, thread, sid, paths)
-    try:
-        pbcore.commit_paths(root, paths, subject, body)
-    except pbcore.PlotbookError as err:
-        errors.append("commit failed (work is safe in the working tree; the next turn retries): %s" % err)
-    else:
-        for p in (pending, pbcore.turn_path(root, sid), pbcore.note_path(root, thread)):
+    candidates = pbcore.confine(root, journaled + pbcore.thread_owned_changes(root, thread))
+    changed = pbcore.changed_paths(root, candidates) if candidates else []
+    note = pbcore.note_path(root, thread)
+    if not changed:
+        # Conversation-only turn: the synced transcript and the recorded prompts wait for the next commit.
+        for p in (pending, note):
             if os.path.exists(p):
                 os.remove(p)
+    else:
+        paths = pbcore.confine(root, changed + pbcore.thread_transcript_changes(root, thread)
+                               + pbcore.manifest_changes(root, thread))
+        subject, body = compose_message(root, thread, sid, paths)
+        try:
+            pbcore.commit_paths(root, paths, subject, body)
+        except pbcore.PlotbookError as err:
+            errors.append("commit failed (work is safe in the working tree; the next turn retries): %s" % err)
+        else:
+            for p in (pending, pbcore.turn_path(root, sid), note):
+                if os.path.exists(p):
+                    os.remove(p)
     if errors:
         print("plotbook: " + "\nplotbook: ".join(errors), file=sys.stderr)
         return 1

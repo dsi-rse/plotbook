@@ -53,8 +53,8 @@ exec(open("scripts/shared_0007.py").read())
 - `shared` is reserved; it is never a thread name.
 
 ## Git: hooks own it all
-- **Never run `git` or `gh`.** Not even read-only. The Stop hook commits each turn's files and
-  transcript automatically. Pushing and PR comments happen only when the user presses Publish
+- **Never run `git` or `gh`.** Not even read-only. The Stop hook commits each file-changing turn's files
+  and transcript automatically. Pushing and PR comments happen only when the user presses Publish
   in the viewer (`/plotbook:push` opens it).
 - **At the end of every turn that created or changed files**, run
   `plotbook-note T "<one-line summary of what the user asked for>"`. Write it in the user's register,

@@ -27,3 +27,13 @@
   before the exec line (conventions skill header template). shared_0000 keeps its guard too.
 - **Repro** symlinks the analysis dir's untracked top-level entries (data files) into the worktree. It compares outputs
   ignoring `<metadata>`; `svg.hashsalt` is fixed in shared_0000 for deterministic ids.
+- **Commit policy** (the user's request; overrides spec Decision 3's "every turn commits" and the §9 step 8 meta-commit):
+  only turns that change files commit. Conversation-only turns, `!` commands, and the SessionEnd/PreCompact
+  backstops just sync the transcript, and the next commit carries it along with all prompts since the last commit
+  (the commit body). Publish makes exactly ONE commit: thread_pending (artifacts, owned deltas, transcripts, earlier
+  manifest entries) plus the PNG previews; the comment pins that commit. The new published.jsonl entry can't be in
+  the pinned commit (the comment URL doesn't exist yet), so it stays uncommitted and rides in the thread's next commit
+  (pbcore.manifest_changes). The divider reads the working-tree file, so it moves immediately. Goal: one turn plus
+  publish = two commits.
+- Subject fallback when no prompt was recorded (`!` commands skip UserPromptSubmit): the newest user text in the
+  filtered transcript.

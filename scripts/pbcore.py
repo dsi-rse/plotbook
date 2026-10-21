@@ -443,14 +443,14 @@ def _literal(paths):
     return [":(literal)" + p for p in paths]
 
 
-def changed_paths(root, subdirs=("plots", "scripts")):
-    """Analysis-relative paths under `subdirs` that are untracked, modified, deleted, or staged."""
-    subdirs = [s for s in subdirs if os.path.exists(os.path.join(root, s))] or list(subdirs)
+def changed_paths(root, pathspecs=("plots", "scripts")):
+    """Analysis-relative paths matching `pathspecs` that are untracked, modified, deleted, or staged."""
+    specs = _literal(pathspecs)
     out = set()
-    cp = git(["ls-files", "-z", "--others", "--modified", "--deleted", "--exclude-standard", "--"] + subdirs, root, check=False)
+    cp = git(["ls-files", "-z", "--others", "--modified", "--deleted", "--exclude-standard", "--"] + specs, root, check=False)
     out.update(p for p in cp.stdout.split("\0") if p)
     if head_sha(root):
-        cp = git(["diff", "--cached", "--name-only", "--relative", "-z", "HEAD", "--"] + subdirs, root, check=False)
+        cp = git(["diff", "--cached", "--name-only", "--relative", "-z", "HEAD", "--"] + specs, root, check=False)
         out.update(p for p in cp.stdout.split("\0") if p)
     return sorted(out)
 
@@ -525,11 +525,42 @@ def commit_paths(root, paths, subject, body=""):
         return head_sha(root)
 
 
-def commit_thread_pending(root, thread, subject_note):
-    """Commit whatever this thread owns that is still uncommitted (used by publish/backstops)."""
-    paths = thread_owned_changes(root, thread)
-    tdir = os.path.join(root, ".plotbook", "transcripts")
-    if os.path.isdir(tdir):
-        paths += [os.path.join(".plotbook", "transcripts", n) for n in os.listdir(tdir) if n.startswith(thread + "-")]
-    subject = "%s %s" % (artifact_range(paths, thread), subject_note)
-    return commit_paths(root, paths, subject, "thread: %s" % thread)
+MANIFEST = os.path.join(".plotbook", "published.jsonl")
+
+
+def thread_transcript_changes(root, thread):
+    """This thread's transcripts (any session) that differ from HEAD."""
+    return [p for p in changed_paths(root, [os.path.join(".plotbook", "transcripts")])
+            if os.path.basename(p).startswith(thread + "-")]
+
+
+def manifest_changes(root, thread):
+    """[MANIFEST] if it has uncommitted entries published by `thread`, else [].
+
+    Publishing appends the manifest entry but doesn't commit it (the comment URL only exists
+    after the pinned commit is pushed); it rides along in the thread's next commit.
+    """
+    if MANIFEST not in changed_paths(root, [MANIFEST]):
+        return []
+    committed = git(["show", "HEAD:./" + MANIFEST], root, check=False).stdout.splitlines()
+    for line in read_text_lines(os.path.join(root, MANIFEST)):
+        if line not in committed:
+            try:
+                if json.loads(line).get("thread") == thread:
+                    return [MANIFEST]
+            except ValueError:
+                continue
+    return []
+
+
+def read_text_lines(path):
+    try:
+        with open(path) as f:
+            return f.read().splitlines()
+    except OSError:
+        return []
+
+
+def thread_pending(root, thread):
+    """Everything uncommitted that belongs to `thread`: artifacts, owned deltas, transcripts, manifest."""
+    return thread_owned_changes(root, thread) + thread_transcript_changes(root, thread) + manifest_changes(root, thread)

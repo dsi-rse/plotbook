@@ -208,11 +208,7 @@ def paths(root, thread):
 
 
 def pending_paths(root, thread):
-    out = pbcore.thread_owned_changes(root, thread)
-    for p in pbcore.changed_paths(root, (os.path.join(".plotbook", "transcripts"),)):
-        if os.path.basename(p).startswith(thread + "-"):
-            out.append(p)
-    return out
+    return pbcore.thread_pending(root, thread)
 
 
 def plan(root, thread):
@@ -257,32 +253,34 @@ def publish(root, thread):
     log("pr", "PR #%d in %s (%s)" % (pr["number"], pr["repo"], "private" if private else "public"))
 
     if progress.get("comment_url") is None:
-        log("commit", "committing pending work of thread %s" % thread)
-        sha = pbcore.commit_thread_pending(root, thread, "snapshot before publishing")
-        log("commit", "committed %s" % sha[:10] if sha else "nothing pending")
-
         refs = referenced(draft)
         missing = [r for r in refs if not os.path.exists(os.path.join(root, r))]
         if missing:
             raise PublishError("the draft refers to files that don't exist: %s" % ", ".join(missing))
+        previews = []
         svgs = [r for r in refs if needs_preview(r)]
         if svgs:
             conv = converter()
             if conv is None:
                 raise PublishError("no SVG→PNG converter found. Install one of: cairosvg (pip install cairosvg), "
                                    "rsvg-convert (librsvg), or Inkscape; then publish again.")
-            made = []
             for rel in svgs:
                 src, dst = os.path.join(root, rel), os.path.join(root, preview_rel(rel))
                 if not (os.path.exists(dst) and os.path.getmtime(dst) >= os.path.getmtime(src)):
                     pbcore.ensure_dir(os.path.dirname(dst))
                     render_png(src, dst, conv)
                     log("previews", "rendered %s (%s)" % (preview_rel(rel), conv))
-                made.append(preview_rel(rel))
-            sha = pbcore.commit_paths(root, made, "[%s] PNG previews for comment: %s" % (
-                thread, ", ".join(os.path.splitext(os.path.basename(r))[0] for r in svgs)), "thread: %s" % thread)
-            if sha:
-                log("previews", "committed previews %s" % sha[:10])
+                previews.append(preview_rel(rel))
+
+        # One commit per publish: the thread's pending work (files, transcripts, the previous
+        # comment's manifest entry) plus the PNG previews. The comment's links pin this commit.
+        todo = pbcore.thread_pending(root, thread) + previews
+        n = len(previews)
+        what = ("previews for comment (%d image%s)" % (n, "" if n == 1 else "s")) if n else "snapshot for comment"
+        body = "\n".join(["Previews:"] + ["- " + os.path.basename(r) for r in previews]) + "\n\n" if n else ""
+        sha = pbcore.commit_paths(root, todo, "%s %s" % (pbcore.artifact_range(todo, thread), what),
+                                  body + "thread: %s" % thread)
+        log("commit", "committed %s" % sha[:10] if sha else "nothing new to commit")
 
         log("push", "pushing")
         where = push(root)
@@ -313,15 +311,12 @@ def publish(root, thread):
     rec = {"ts": pbcore.now_iso(), "thread": thread, "artifacts": progress["artifacts"], "through": through,
            "head_sha": progress["head_sha"], "comment_url": progress["comment_url"],
            "pr": progress["pr"]["number"], "pr_url": progress["pr"]["url"]}
-    manifest = os.path.join(root, ".plotbook", "published.jsonl")
+    manifest = os.path.join(root, pbcore.MANIFEST)
     if not any(r.get("comment_url") == rec["comment_url"] for r in pbcore.published(root)):
         pbcore.append_jsonl(manifest, rec)
-    pbcore.commit_paths(root, [os.path.relpath(manifest, root)],
-                        "[%s] published comment (through %s%04d)" % (thread, thread, through),
-                        "comment: %s\nthread: %s" % (rec["comment_url"], thread))
-    log("manifest", "recorded in .plotbook/published.jsonl")
-    push(root)
-    log("push", "pushed the manifest commit")
+    # Not committed now (that would be a commit just for the comment URL): the entry rides along in
+    # this thread's next commit. The viewer's divider reads the working-tree file, so it moves now.
+    log("manifest", "recorded in .plotbook/published.jsonl (committed with the next change)")
 
     archive = pbcore.ensure_dir(pbcore.state_dir(root, "archive"))
     stamp = time.strftime("%Y%m%dT%H%M%S")

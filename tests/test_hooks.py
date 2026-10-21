@@ -212,14 +212,51 @@ def test_immutability_guard(new_session, repo):
     assert p.write("scripts/primary0002-demo.py", "print(2)\n") is None
 
 
+def test_conversation_only_turns_fold_into_next_commit(new_session, repo):
+    s = new_session()
+    s.prompt("/plotbook:start primary")
+    s.stop()
+    n = len(commits(repo))
+    s.prompt("what does the bimodality mean?")
+    assert s.stop("Probably two populations.").returncode == 0
+    s.say("user", '! pkill -f "server/viewer.py --root"')  # `!` commands don't fire UserPromptSubmit
+    assert s.stop("The viewer is stopped.").returncode == 0
+    assert len(commits(repo)) == n  # no commits for turns that changed no files
+    transcript = pbcore.transcript_relpath("primary", s.id)
+    assert "Probably two populations." in open(os.path.join(s.root, transcript)).read()  # synced, not committed
+    s.prompt("now plot it")
+    make_plot(s, "primary", 1)
+    s.stop()
+    subject, files = commits(repo)[0]
+    assert len(commits(repo)) == n + 1 and subject == "[primary0001] now plot it"
+    assert "analysis/" + transcript in files
+    body = git(repo, "log", "-1", "--format=%b")
+    assert "what does the bimodality mean?" in body and "now plot it" in body
+    assert "The viewer is stopped." in git(repo, "show", "HEAD:analysis/" + transcript)
+
+
+def test_subject_falls_back_to_transcript_when_no_prompt_recorded(new_session, repo):
+    s = new_session()
+    s.prompt("/plotbook:start primary")
+    s.stop()
+    s.say("user", "! python3 scripts/primary0001-demo.py")  # typed by the user, no UserPromptSubmit
+    rel = "scripts/primary0001-demo.py"
+    with open(os.path.join(s.root, rel), "w") as f:
+        f.write("print(1)\n")
+    s.stop()
+    assert commits(repo)[0][0] == "[primary0001] ! python3 scripts/primary0001-demo.py"
+
+
 def test_backstop_sessionend_releases(new_session, repo):
     s = new_session()
     s.prompt("/plotbook:start primary")
     s.stop()
+    n = len(commits(repo))
     s.say("user", "one more thing")
     r = s.hook("sync_transcript.py", hook_event_name="SessionEnd")
     assert r.returncode == 0, r.stderr
-    assert commits(repo)[0][0].startswith("[primary] transcript sync")
+    assert len(commits(repo)) == n  # sync only; the next commit carries it
+    assert "one more thing" in open(os.path.join(s.root, pbcore.transcript_relpath("primary", s.id))).read()
     assert pbcore.session_thread(s.root, s.id) is None
     # Resuming the same session re-claims its thread.
     r = s.prompt("resumed")

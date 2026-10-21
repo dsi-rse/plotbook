@@ -95,13 +95,20 @@ def test_publish_end_to_end(published_env, repo):
     # The pinned commit is on the remote and contains the preview.
     assert git(remote, "cat-file", "-t", sha).strip() == "commit"
     assert git(remote, "cat-file", "-t", "%s:analysis/.plotbook/previews/primary0001-demo.png" % sha).strip() == "blob"
-    # Manifest: committed and pushed; divider covers everything existing (through = 3).
+    # Manifest: the divider covers everything existing (through = 3).
     assert rec["through"] == 3 and rec["artifacts"] == ["plots/primary0001-demo.svg", "plots/primary0002-map.geojson"]
     assert rec["comment_url"] == head["url"] and rec["pr"] == 7
     assert pbcore.last_through(s.root, "primary") == 3
+    # One publish commit: the pending primary0003 work plus the preview. It is the pinned, pushed commit.
+    subject, files = commits(repo)[0]
+    assert subject == "[primary0001\u2013primary0003] previews for comment (1 image)"
+    assert sorted(files) == sorted(["analysis/.plotbook/previews/primary0001-demo.png",
+                                    "analysis/plots/primary0003-unmentioned.svg",
+                                    "analysis/scripts/primary0003-unmentioned.py"])
+    assert git(repo, "rev-parse", "HEAD").strip() == sha
     assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", "analysis-branch")
-    assert commits(repo)[0][0] == "[primary] published comment (through primary0003)"
-    assert git(repo, "status", "--porcelain", "--", "analysis") == ""
+    # The manifest entry waits for the next commit (first publish: a new file).
+    assert git(repo, "status", "--porcelain", "--", "analysis").split() == ["??", "analysis/.plotbook/published.jsonl"]
     # Draft archived and cleared.
     assert not os.path.exists(pbcore.state_dir(s.root, "draft-primary.md"))
     assert len(os.listdir(pbcore.state_dir(s.root, "archive"))) == 3
@@ -172,3 +179,32 @@ def test_repro_in_worktree_with_dirty_tree(new_session, repo):
     assert "linked untracked entries into the worktree: data.csv" in cp.stdout
     assert git(repo, "status", "--porcelain") == before
     assert git(repo, "worktree", "list").count("\n") == 1
+
+
+def test_one_turn_then_publish_is_two_commits(published_env, repo):
+    s, remote, tmp = published_env
+    s.prompt("one more plot")
+    make_plot(s, "primary", 4)
+    s.stop()  # commit 1 (also carries primary0003, made without a Stop)
+    n = len(commits(repo))
+    write_state(s, '<img src="plots/primary0004-demo.svg" alt="primary0004-demo.svg">\n', "")
+    cp, logs = run_publish(s)
+    assert logs[-1].get("done"), logs
+    assert len(commits(repo)) == n + 1  # commit 2: the previews; nothing else
+    # A chat turn adds no commit; the next file-changing turn carries the manifest entry and the chat.
+    s.prompt("thanks, what next?")
+    s.stop("Maybe split by island.")
+    assert len(commits(repo)) == n + 1
+    s.prompt("split by island")
+    make_plot(s, "primary", 5)
+    s.stop()
+    _, files = commits(repo)[0]
+    assert "analysis/.plotbook/published.jsonl" in files
+    assert git(repo, "status", "--porcelain", "--", "analysis") == ""
+    # The next publish also carries a still-uncommitted manifest entry from the previous one.
+    write_state(s, "text only\n", "")
+    run_publish(s)
+    write_state(s, "again\n", "")
+    run_publish(s)
+    _, files = commits(repo)[0]
+    assert files == ["analysis/.plotbook/published.jsonl"] and len(pbcore.published(s.root)) == 3

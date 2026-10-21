@@ -347,28 +347,33 @@ async def api_publish_run(request):
 PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8"><title>__TITLE__ · plotbook</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-:root { --fg:#1f2328; --muted:#656d76; --line:#d0d7de; --accent:#0969da; --new:#fff8c5; --bg:#fff; }
+:root { --fg:#1f2328; --muted:#656d76; --line:#d0d7de; --accent:#0969da; --bg:#fff; }
 * { box-sizing: border-box; }
+/* The page is exactly one viewport tall: a flex column whose middle part absorbs the slack,
+   so there is never a page-level scrollbar (100dvh where supported, 100vh otherwise). */
+html, body { height:100%; }
+body { display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; }
+body > header, #nav, body > .strip { flex:0 0 auto; }
 body { margin:0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color:var(--fg); background:var(--bg); }
 header { display:flex; gap:1em; align-items:center; padding:.5em 1em; border-bottom:1px solid var(--line); }
 header h1 { font-size:1.1em; margin:0; } header .path { color:var(--muted); font-size:.85em; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 a { color:var(--accent); } button { font:inherit; padding:.3em .8em; border:1px solid var(--line); border-radius:6px; background:#f6f8fa; cursor:pointer; }
 button.primary { background:#1f883d; color:#fff; border-color:#1a7f37; } button:disabled { opacity:.5; cursor:default; }
-main.index { padding:1em 2em; } .path { color:var(--muted); }
-#stage { display:flex; align-items:center; justify-content:center; height:calc(100vh - 190px); padding:.5em; position:relative; }
+main.index { padding:1em 2em; flex:1 1 auto; overflow:auto; } .path { color:var(--muted); }
+#stage { flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; padding:.5em; position:relative; }
 #stage img { width:100%; height:100%; object-fit:contain; background:#fff; }
 #stage .card, .tray .card { border:1px solid var(--line); border-radius:8px; padding:1.5em; text-align:center; }
 #nav { display:flex; gap:.5em; align-items:center; justify-content:center; padding:.25em; }
 #nav .name { font-family: ui-monospace, monospace; min-width:24em; text-align:center; }
-.strip { display:flex; gap:6px; overflow-x:auto; padding:6px 1em; border-top:1px solid var(--line); height:110px; align-items:stretch; }
-.thumb { flex:0 0 auto; width:120px; border:2px solid transparent; border-radius:4px; cursor:pointer; display:flex; flex-direction:column; align-items:center; background:#fff; }
+.strip { display:flex; gap:6px; overflow-x:auto; overflow-y:hidden; padding:6px 1em 10px; border-top:1px solid var(--line); align-items:stretch; overscroll-behavior-x:contain; }
+.thumb { flex:0 0 auto; width:120px; border:2px solid transparent; border-radius:4px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:4px; padding:2px 0 5px; background:#fff; }
 .thumb img { width:116px; height:72px; object-fit:contain; }
-.thumb .label { font: 10px ui-monospace, monospace; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:116px; text-align:center; }
-.thumb.current { border-color:var(--accent); } .thumb.new { background:var(--new); }
+.thumb .label { font: 10px/1.3 ui-monospace, monospace; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:116px; text-align:center; }
+.thumb.current { border-color:var(--accent); }
 .thumb .ext { width:116px; height:72px; display:flex; align-items:center; justify-content:center; font:600 13px ui-monospace, monospace; color:var(--muted); }
-.divider { flex:0 0 auto; width:0; border-left:3px dashed #cf222e; margin:0 4px; position:relative; }
-.divider span { position:absolute; top:-2px; left:4px; font-size:10px; color:#cf222e; white-space:nowrap; }
-.draft { display:grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) auto auto; gap:8px; padding:8px; height:calc(100vh - 50px); }
+.divider { flex:0 0 auto; display:flex; align-items:center; border-left:3px dashed #cf222e; margin:0 4px; padding-left:2px; }
+.divider span { writing-mode:vertical-rl; transform:rotate(180deg); font-size:10px; line-height:1; color:#cf222e; white-space:nowrap; }
+.draft { flex:1 1 auto; min-height:0; display:grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) auto auto; gap:8px; padding:8px; }
 .draft textarea { width:100%; height:100%; font: 13px/1.5 ui-monospace, monospace; padding:8px; border:1px solid var(--line); border-radius:6px; resize:none; }
 .pane { display:flex; flex-direction:column; min-height:0; } .pane h2 { font-size:.85em; margin:0 0 4px; color:var(--muted); display:flex; gap:.5em; align-items:center; }
 .preview { overflow:auto; border:1px solid var(--line); border-radius:6px; padding:16px; height:100%; }
@@ -405,14 +410,28 @@ function thumbHtml(a, cls) {
 }
 function stripHtml(arts, through, currentName) {
   let html = "", placed = through === 0;
-  if (through === 0 && arts.length) html += `<div class="divider"><span>nothing published yet</span></div>`;
+  if (through === 0 && arts.length) html += `<div class="divider"><span>nothing published</span></div>`;
   for (const a of arts) {
     if (!placed && a.n > through) { html += `<div class="divider"><span>last comment</span></div>`; placed = true; }
-    html += thumbHtml(a, (a.name === currentName ? "current " : "") + (a.n > through ? "new" : ""));
+    html += thumbHtml(a, a.name === currentName ? "current" : "");
   }
   if (!placed && arts.length) html += `<div class="divider"><span>last comment</span></div>`;
   return html;
 }
+// Thumbnail strips scroll horizontally. A vertical-only mouse wheel is turned into horizontal
+// scrolling; input that is already mostly horizontal (trackpad swipes, tilt wheels, Shift+wheel,
+// which browsers report as deltaX) is left to the browser's native scrolling.
+function wheelToHorizontal(el) {
+  el.addEventListener("wheel", e => {
+    if (e.ctrlKey) return;                                   // pinch / Ctrl+wheel zoom
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;    // horizontal-dominant: native
+    if (el.scrollWidth <= el.clientWidth) return;            // nothing to scroll
+    const unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? el.clientWidth : 1;  // lines / pages / pixels
+    el.scrollLeft += (e.deltaY + e.deltaX) * unit;
+    e.preventDefault();
+  }, {passive: false});
+}
+document.querySelectorAll(".strip").forEach(wheelToHorizontal);
 function onEvents(handler) {
   const es = new EventSource("/events");
   es.onmessage = ev => handler(JSON.parse(ev.data));

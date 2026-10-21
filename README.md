@@ -8,9 +8,9 @@ notebook for exploratory data analysis.
 - **Every result is a plain file.** Numbered, self-contained plot scripts (`scripts/primary0042-….py`)
   write SVGs (`plots/primary0042-….svg`, text kept editable for Inkscape). There's no server to start
   and no kernel. Look at plots with any file manager; re-run any one with `python`.
-- **Everything is git-bound.** Each conversational turn is committed automatically: the scripts,
-  the outputs, and a filtered transcript of the conversation that produced them. Nothing is pushed or
-  posted until you press Publish.
+- **Everything is git-bound.** Every turn that changes files is committed automatically: the scripts,
+  the outputs, and a filtered transcript of the conversation that produced them. Turns that are only
+  conversation ride along in the next commit. Nothing is pushed or posted until you press Publish.
 
 ## Install
 
@@ -34,12 +34,12 @@ It therefore works with `"deny": ["Bash(git *)", "Bash(gh *)"]` in your settings
 3. `/plotbook:start primary` claims the thread `primary` for this session. It creates `plots/`, `scripts/`,
    and `.plotbook/`, and prints the viewer URL. Keep that tab open. New plots appear on its stage as they're
    written; arrow keys walk the history.
-4. Ask for plots. Each turn ends in a commit like `[primary0003–primary0004] split by island`.
+4. Ask for plots. Each turn that makes or changes files ends in a commit like `[primary0003–primary0004] split by island`.
 5. For a side question, open another Claude Code session in the same directory and run `/plotbook:start tangent`.
    Threads are independent, numbered sequences, each with its own viewer tab.
 6. `/plotbook:push` opens the draft view. Write your comment there, and click thumbnails to insert plots
    at the cursor. Edit the prefilled Extra-details pane (empty it to omit the block), then press **Publish**.
-   This commits PNG previews, pushes, and posts the comment. Images are pinned to the pushed commit and
+   This makes one commit (any pending work plus the PNG previews), pushes, and posts the comment. Images are pinned to the pushed commit and
    link to their SVGs, so they keep rendering after a squash merge and branch deletion.
 7. `/plotbook:repro primary0003` re-runs an old script from its commit in a temporary `git worktree`,
    without touching your working tree.
