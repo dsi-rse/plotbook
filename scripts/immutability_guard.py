@@ -67,7 +67,7 @@ def check(root, thread, tool, ti):
             return "%s belongs to thread %s; %s" % (rel, owner, alloc_hint)
         if tool == "Write" and m > 0:
             first = text.split("\n", 1)[0]
-            if not pbcore.DELTA_LINE_RE.match(first):
+            if pbcore.match_exec_line(first, pbcore.exec_style(root)) is None:
                 with open(abspath) as f:
                     expected = f.readline().rstrip("\n")
                 return "the first line of %s must stay exactly %s" % (rel, expected)
@@ -85,13 +85,14 @@ def check(root, thread, tool, ti):
                     "a new number (next: %s%04d)." % (art[0], art[1], art[0], pbcore.next_number(root, art[0])))
     if sub == "scripts" and name.endswith(".py") and text:
         try:
+            style = pbcore.exec_style(root)
             if tool == "Write":
-                pbcore.script_leaf_from_text(text, rel)
+                pbcore.script_leaf_from_text(text, rel, style)
             else:
                 for i, line in enumerate(text.splitlines(), 1):
-                    if pbcore.EXEC_LIKE_RE.match(line) and not pbcore.DELTA_LINE_RE.match(line):
-                        raise pbcore.PlotbookError(
-                            '%s: exec line must be exactly exec(open("scripts/shared_NNNN.py").read())' % rel)
+                    if pbcore.EXEC_LIKE_RE.match(line) and pbcore.match_exec_line(line, style) is None:
+                        raise pbcore.PlotbookError("%s: exec line must be exactly %s"
+                                                   % (rel, pbcore.canonical_exec_line("NNNN", style)))
         except pbcore.PlotbookError as err:
             return str(err)
     return None

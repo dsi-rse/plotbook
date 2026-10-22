@@ -112,7 +112,9 @@ sessions allocate different numbers with different parents, so lineages can neve
 interleave into each other.
 
 The mechanism is deliberately the dumbest possible working Python. A delta's first
-line is `exec(open("scripts/shared_0007.py").read())` — simultaneously the code that
+line is `exec(compile(open(_f := "scripts/shared_0007.py").read(), _f, "exec"))` (originally
+`exec(open("scripts/shared_0007.py").read())`; compile() with the filename was adopted so that
+tracebacks name the delta file and line instead of `<string>`) — simultaneously the code that
 loads its ancestry and the machine-readable tree edge. Because `exec` without a
 namespace argument runs in the enclosing namespace, execing a leaf recursively merges
 all ancestors, root first, into the plot script's own globals; later definitions

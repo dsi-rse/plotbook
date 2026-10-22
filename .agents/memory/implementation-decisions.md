@@ -51,3 +51,8 @@
   branch name, draft UNchecked by default: free-plan private repos reject draft PRs, user's call) and reruns with --create-pr <json>. create_pr pushes `-u` (sets the upstream),
   then `gh pr create --repo --base --head --title --body [--draft]` (--body is always passed: gh prompts otherwise).
   Not handled: no remote at all (error), forks (PR base = the push remote's repo).
+- **Exec line uses compile() with the filename** (user request): `exec(compile(open(_f := "scripts/shared_NNNN.py").read(), _f, "exec"))`.
+  Plain exec(open().read()) gave tracebacks `File "<string>", line 3` with no file or source line. `_f`, not `p`, so
+  the walrus can't clobber a user variable. Per-analysis: pbcore.exec_style(root) = "legacy" when the analysis's
+  immutable shared_0000.py lacks `_f := ` (scaffolded earlier, e.g. greenwave), because its provenance regex only knows
+  the old line. Writes (guard, alloc_delta) require the analysis's style; reads (delta_tree, repro) accept both.

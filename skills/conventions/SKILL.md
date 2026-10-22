@@ -35,12 +35,14 @@ Then comes the library pin:
 import os, sys
 import numpy as np
 if not os.path.isdir("plots"): sys.exit("plotbook: run from the analysis root: python scripts/" + os.path.basename(__file__))
-exec(open("scripts/shared_0007.py").read())
+exec(compile(open(_f := "scripts/shared_0007.py").read(), _f, "exec"))
 ```
 
 ## Shared library: append-only delta tree
 - Load the library with exactly one exec line in the canonical form above, at top level, pinning
   the `leaf=` from the context line. Copy the previous script's line unless deliberately branching.
+  (Analyses started before this form use `exec(open("scripts/shared_0007.py").read())` instead; keep
+  whichever form the analysis's scripts already use. The guard names the expected form if you get it wrong.)
 - Each delta's first line execs its parent, so the leaf pulls in its ancestors root-first into the
   script's globals. Later definitions override earlier ones everywhere, because the helpers share those globals.
 - **Never edit an existing delta.** To add or change helpers, run

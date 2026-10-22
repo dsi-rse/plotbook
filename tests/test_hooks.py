@@ -10,7 +10,7 @@ import pbcore
 
 PLOT = ('"""{name}"""\nimport os, sys\n'
         'if not os.path.isdir("plots"): sys.exit("plotbook: run from the analysis root")\n'
-        'exec(open("scripts/shared_{leaf:04d}.py").read())\n'
+        'exec(compile(open(_f := "scripts/shared_{leaf:04d}.py").read(), _f, "exec"))\n'
         'fig, ax = plt.subplots()\nax.plot([1, 2, {k}])\nsave(fig)\n')
 
 

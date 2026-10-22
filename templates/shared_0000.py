@@ -1,5 +1,7 @@
 # plotbook root delta: run-from-root guard, matplotlib bootstrap, save() helper.
-# Never edit this file; put changes in a new delta (shared_NNNN.py) that execs its parent.
+# Never edit this file; put changes in a new delta (shared_NNNN.py) that execs its parent with
+#     exec(compile(open(_f := "scripts/shared_NNNN.py").read(), _f, "exec"))
+# (compile() with the filename gives tracebacks that name the delta file and line).
 import os as _os
 import sys as _sys
 
@@ -37,7 +39,7 @@ def _plotbook_provenance(script):
 
     info = {"script": script, "leaf": None, "commit": "unknown", "dirty": None, "session": None,
             "time": datetime.datetime.now().astimezone().isoformat(timespec="seconds")}
-    canon = re.compile(r'^exec\(open\("scripts/(shared_\d{4}\.py)"\)\.read\(\)\)\s*$')
+    canon = re.compile(r'^exec\((?:compile\(open\(_f := |open\()"scripts/(shared_\d{4}\.py)"\)\.read\(\)(?:, _f, "exec"\))?\)\s*$')
     try:
         with open(script) as f:
             for line in f:

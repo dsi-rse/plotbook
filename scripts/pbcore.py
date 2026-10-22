@@ -21,9 +21,17 @@ ARTIFACT_RE = re.compile(
     r"^(?P<thread>[A-Za-z](?:[A-Za-z_-]*[A-Za-z])?)(?P<n>\d{4})-(?P<slug>.+)\.(?P<ext>[A-Za-z0-9]+)$"
 )
 DELTA_NAME_RE = re.compile(r"^shared_(\d{4})\.py$")
-DELTA_LINE_RE = re.compile(r'^exec\(open\("scripts/shared_(\d{4})\.py"\)\.read\(\)\)\s*$')
+# The canonical exec line: one form, matched exactly. compile() with the filename makes tracebacks
+# name the delta file (with source line and carets) at every level of the chain; the walrus target
+# `_f` is unlikely to clobber a name in the user's script.
+EXEC_LINE = 'exec(compile(open(_f := "scripts/shared_%s.py").read(), _f, "exec"))'
+DELTA_LINE_RE = re.compile(r'^exec\(compile\(open\(_f := "scripts/shared_(\d{4})\.py"\)\.read\(\), _f, "exec"\)\)\s*$')
+# Analyses scaffolded before the compile() form keep the old line: their root delta is immutable and
+# its provenance code only recognizes this one. See exec_style().
+LEGACY_EXEC_LINE = 'exec(open("scripts/shared_%s.py").read())'
+LEGACY_DELTA_LINE_RE = re.compile(r'^exec\(open\("scripts/shared_(\d{4})\.py"\)\.read\(\)\)\s*$')
 # Anything that looks like an attempt at an exec line, canonical or not.
-EXEC_LIKE_RE = re.compile(r"^\s*exec\s*\(\s*open\s*\(")
+EXEC_LIKE_RE = re.compile(r"^\s*exec\s*\(\s*(?:compile\s*\(\s*)?open\s*\(")
 
 MARKER = "TRANSCRIPT-SYNC-BROKEN"
 
@@ -60,8 +68,29 @@ def valid_thread(name):
     return bool(THREAD_RE.match(name)) and name not in RESERVED_THREADS
 
 
-def canonical_exec_line(m):
-    return 'exec(open("scripts/shared_%04d.py").read())' % m
+def exec_style(root):
+    """"compile" (EXEC_LINE), or "legacy" if this analysis's root delta predates that form."""
+    try:
+        with open(os.path.join(root, "scripts", "shared_0000.py")) as f:
+            text = f.read()
+    except OSError:
+        return "compile"
+    return "compile" if "_f := " in text else "legacy"
+
+
+def canonical_exec_line(m, style="compile"):
+    """The exec line pinning delta `m` (an int, or a placeholder string such as "NNNN")."""
+    return (LEGACY_EXEC_LINE if style == "legacy" else EXEC_LINE) % (m if isinstance(m, str) else "%04d" % m)
+
+
+def match_exec_line(line, style=None):
+    """Delta number pinned by a canonical exec line in `style` (either form if None), else None."""
+    for st, rx in (("compile", DELTA_LINE_RE), ("legacy", LEGACY_DELTA_LINE_RE)):
+        if style in (None, st):
+            m = rx.match(line)
+            if m:
+                return int(m.group(1))
+    return None
 
 
 def parse_artifact(name):
@@ -122,9 +151,8 @@ def delta_parent(path):
         raise PlotbookError("not a shared delta: %s" % path)
     with open(path) as f:
         first = f.readline()
-    m = DELTA_LINE_RE.match(first)
-    if m:
-        parent = int(m.group(1))
+    parent = match_exec_line(first)
+    if parent is not None:
         if parent >= int(mo.group(1)):
             raise PlotbookError("%s: parent shared_%04d is not older than the delta" % (path, parent))
         return parent
@@ -132,7 +160,8 @@ def delta_parent(path):
         return None
     raise PlotbookError(
         "%s: first line must be exactly %s (got %r)"
-        % (path, 'exec(open("scripts/shared_NNNN.py").read())', first.rstrip("\n"))
+        % (path, canonical_exec_line("NNNN", exec_style(os.path.dirname(os.path.dirname(os.path.abspath(path))))),
+           first.rstrip("\n"))
     )
 
 
@@ -162,18 +191,19 @@ def delta_chain(tree, leaf):
     return chain[::-1]
 
 
-def script_leaf_from_text(text, where="script"):
-    """The single delta number a plot script pins, or None if it pins nothing."""
+def script_leaf_from_text(text, where="script", style=None):
+    """The single delta number a plot script pins, or None if it pins nothing.
+
+    `style` (see exec_style) requires that form of the exec line; None accepts either.
+    """
     leaves = []
     for i, line in enumerate(text.splitlines(), 1):
         if EXEC_LIKE_RE.match(line):
-            m = DELTA_LINE_RE.match(line)
-            if not m:
-                raise PlotbookError(
-                    "%s line %d: exec line must be exactly "
-                    'exec(open("scripts/shared_NNNN.py").read()) at top level' % (where, i)
-                )
-            leaves.append(int(m.group(1)))
+            m = match_exec_line(line, style)
+            if m is None:
+                raise PlotbookError("%s line %d: exec line must be exactly %s at top level"
+                                    % (where, i, canonical_exec_line("NNNN", style or "compile")))
+            leaves.append(m)
     if len(leaves) > 1:
         raise PlotbookError("%s pins more than one shared delta: %s" % (where, leaves))
     return leaves[0] if leaves else None

@@ -23,12 +23,13 @@ def allocate(root, thread, parent):
     pbcore.delta_tree(root)  # loud failure if the existing tree is malformed
     existing = [int(m.group(1)) for m in (pbcore.DELTA_NAME_RE.match(n) for n in os.listdir(scripts)) if m]
     m = max(existing, default=-1) + 1
+    style = pbcore.exec_style(root)
     # Write a private temp file, then hard-link it into place: the link fails if the name is
     # taken (atomic claim, like open(..., "x")), and the file never appears without its first
     # line, so a concurrent allocator's delta_tree() check can't see it empty.
     tmp = os.path.join(scripts, ".shared-alloc-%d.tmp" % os.getpid())
     with open(tmp, "w") as f:
-        f.write(pbcore.canonical_exec_line(parent) + "\n")
+        f.write(pbcore.canonical_exec_line(parent, style) + "\n")
     try:
         while True:
             try:
@@ -59,8 +60,10 @@ def main(argv=None):
     except (pbcore.PlotbookError, ValueError) as err:
         sys.exit("plotbook-delta: %s" % err)
     print(rel)
-    print("Its first line is already %s; add only the changed definitions below it." % pbcore.canonical_exec_line(parent))
-    print("Plot scripts pin it with: %s" % pbcore.canonical_exec_line(m))
+    style = pbcore.exec_style(root)
+    print("Its first line is already %s; add only the changed definitions below it."
+          % pbcore.canonical_exec_line(parent, style))
+    print("Plot scripts pin it with: %s" % pbcore.canonical_exec_line(m, style))
 
 
 if __name__ == "__main__":

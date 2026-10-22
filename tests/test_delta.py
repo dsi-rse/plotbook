@@ -68,7 +68,7 @@ def test_plain_import_of_delta_merges_into_module(analysis):
 
 
 def test_missing_parent_and_malformed_line_are_loud(analysis):
-    write(analysis, "scripts/shared_0005.py", 'exec(open("scripts/shared_0004.py").read())\n')
+    write(analysis, "scripts/shared_0005.py", pbcore.canonical_exec_line(4) + "\n")
     with pytest.raises(pbcore.PlotbookError, match="does not exist"):
         pbcore.delta_tree(analysis)
     write(analysis, "scripts/shared_0005.py", "exec(open('scripts/shared_0000.py').read())\n")
@@ -76,6 +76,42 @@ def test_missing_parent_and_malformed_line_are_loud(analysis):
         pbcore.delta_tree(analysis)
     with pytest.raises(pbcore.PlotbookError, match="exec line must be exactly"):
         pbcore.script_leaf_from_text("exec(open('scripts/shared_0000.py').read())\n")
+    # In a compile-style analysis, the legacy form is readable but not accepted for new code.
+    legacy = pbcore.canonical_exec_line(0, "legacy") + "\n"
+    assert pbcore.script_leaf_from_text(legacy) == 0
+    with pytest.raises(pbcore.PlotbookError, match=r'exactly exec\(compile\(open\(_f := "scripts/shared_NNNN.py"'):
+        pbcore.script_leaf_from_text(legacy, style=pbcore.exec_style(analysis))
+
+
+def test_traceback_names_the_delta_file(analysis):
+    m1, rel1 = alloc_delta.allocate(analysis, "primary", 0)
+    with open(os.path.join(analysis, rel1), "a") as f:
+        f.write("def g():\n    return 1 / 0\n")
+    m2, rel2 = alloc_delta.allocate(analysis, "primary", m1)
+    write(analysis, "scripts/primary0001-x.py", pbcore.canonical_exec_line(m2) + "\ng()\n")
+    r = run(analysis, "scripts/primary0001-x.py")
+    assert 'File "%s", line 3, in g' % rel1 in r.stderr and "return 1 / 0" in r.stderr
+    assert "<string>" not in r.stderr
+    # An error while loading the chain names every level of it.
+    with open(os.path.join(analysis, rel1), "a") as f:
+        f.write("undefined_name\n")
+    r = run(analysis, "scripts/primary0001-x.py")
+    assert 'File "%s", line 1, in <module>' % rel2 in r.stderr
+    assert 'File "%s", line 4, in <module>' % rel1 in r.stderr and "<string>" not in r.stderr
+
+
+def test_legacy_analysis_keeps_legacy_exec_line(analysis):
+    # An analysis scaffolded before the compile() form: its immutable root delta knows only the old line.
+    root0 = os.path.join(analysis, "scripts", "shared_0000.py")
+    text = open(root0).read()
+    text = text.replace(text[text.index("# Never edit"):text.index("import os")], "# Never edit this file.\n")
+    write(analysis, "scripts/shared_0000.py", text.replace("(?:compile\\(open\\(_f := |open\\()", "open\\("))
+    assert pbcore.exec_style(analysis) == "legacy"
+    m, rel = alloc_delta.allocate(analysis, "primary", 0)
+    assert open(os.path.join(analysis, rel)).read() == 'exec(open("scripts/shared_0000.py").read())\n'
+    assert pbcore.delta_tree(analysis) == {0: None, m: 0}
+    with pytest.raises(pbcore.PlotbookError, match=r'exactly exec\(open\("scripts/shared_NNNN.py"\)'):
+        pbcore.script_leaf_from_text(pbcore.canonical_exec_line(m) + "\n", style="legacy")
 
 
 def test_run_from_root_guard_and_svg_output(analysis):
