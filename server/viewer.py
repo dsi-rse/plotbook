@@ -320,13 +320,18 @@ def _publish_line(t, raw):
     HUB.send({"type": "publish", "thread": t, "log": rec})
 
 
-async def run_publish(t):
+async def run_publish(t, new_pr=None):
     HUB.send({"type": "publish", "thread": t, "log": {"step": "start", "msg": "publishing"}})
+    cmd = publish_cmd(t)
+    if new_pr is not None:
+        spec = pbcore.state_dir(ROOT, "publish-%s-newpr.json" % t)
+        pbcore.write_json(spec, new_pr)
+        cmd += ["--create-pr", spec]
     # A plain detached process read by a daemon thread, not an asyncio subprocess: asyncio kills
     # its children when the viewer shuts down (e.g. at SessionEnd), and a publish must finish.
     loop = asyncio.get_running_loop()
     finished = loop.create_future()
-    proc = subprocess.Popen(publish_cmd(t), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, start_new_session=True)
 
     def pump():
@@ -339,7 +344,8 @@ async def run_publish(t):
 
     threading.Thread(target=pump, daemon=True).start()
     code = await finished
-    if code != 0:
+    _pr_cache["t"] = 0  # the PR may have just been created
+    if code not in (0, 3):  # 3: no PR yet; the page asks for its title (the need_pr log line)
         HUB.send({"type": "publish", "thread": t, "log": {"error": "publish exited with status %d" % code}})
 
 
@@ -350,7 +356,17 @@ async def api_publish_run(request):
     job = JOBS.get(("publish", t))
     if job is not None and not job.done():
         return JSONResponse({"error": "a publish is already running for this thread"}, status_code=409)
-    JOBS[("publish", t)] = asyncio.create_task(run_publish(t))
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except ValueError:
+        return JSONResponse({"error": "bad request body"}, status_code=400)
+    new_pr = body.get("create_pr")
+    if new_pr is not None:
+        if not (isinstance(new_pr, dict) and str(new_pr.get("title", "")).strip()):
+            return JSONResponse({"error": "a PR title is required"}, status_code=400)
+        new_pr = {"title": str(new_pr["title"]).strip(), "body": str(new_pr.get("body") or ""),
+                  "draft": bool(new_pr.get("draft"))}
+    JOBS[("publish", t)] = asyncio.create_task(run_publish(t, new_pr))
     return JSONResponse({"ok": True})
 
 
@@ -397,6 +413,11 @@ main.index { padding:1em 2em; flex:1 1 auto; overflow:auto; } .path { color:var(
 .status { font-size:.85em; color:var(--muted); }
 dialog { max-width:760px; width:90vw; border:1px solid var(--line); border-radius:8px; }
 dialog pre { max-height:40vh; overflow:auto; background:#f6f8fa; padding:8px; font-size:12px; white-space:pre-wrap; }
+#prdlg label { display:block; margin:.6em 0 .2em; font-weight:600; font-size:.9em; }
+#prdlg input[type=text], #prdlg textarea { width:100%; box-sizing:border-box; font:inherit; padding:6px; border:1px solid var(--line); border-radius:6px; }
+#prdlg textarea { height:8em; font: 13px/1.5 ui-monospace, monospace; resize:vertical; }
+#prdlg label.check { font-weight:normal; display:flex; gap:.4em; align-items:center; }
+#prdlg .buttons { display:flex; gap:.5em; justify-content:flex-end; margin-top:1em; }
 </style>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-light.css">
 </head><body>
@@ -525,6 +546,12 @@ DRAFT_HTML = """
   <div class="tray"><div class="strip" id="tray"></div></div>
 </div>
 <dialog id="logdlg"><h3 id="logtitle">Publishing…</h3><pre id="log"></pre><p id="result"></p><p><button id="closelog" disabled>OK</button></p></dialog>
+<dialog id="prdlg"><form id="prform" method="dialog"><h3>Open a pull request</h3><p id="prwhy"></p>
+  <label for="prtitle">Title</label><input type="text" id="prtitle" required>
+  <label for="prbody">Description (optional, markdown)</label><textarea id="prbody"></textarea>
+  <label class="check"><input type="checkbox" id="prdraft"> Draft pull request</label>
+  <div class="buttons"><button type="button" id="prcancel">Cancel</button><button class="primary" id="prok">Create PR and publish</button></div>
+</form></dialog>
 <script>const THREAD = "__THREAD__";</script>
 <script>window.MathJax = { tex: { inlineMath: [['$','$']], displayMath: [['$$','$$']] }, startup: { typeset: false } };</script>
 <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
@@ -602,16 +629,39 @@ function finishPublish(state, title, resultHtml) {
   document.getElementById("result").innerHTML = resultHtml;
   okBtn.disabled = false; okBtn.focus();
 }
-publishBtn.onclick = async () => {
+async function startPublish(createPr) {
   if (publishState === "running") return;
   publishState = "running"; publishBtn.disabled = true; okBtn.disabled = true;
   document.getElementById("logtitle").textContent = "Publishing…";
   document.getElementById("log").textContent = ""; document.getElementById("result").textContent = "";
   logDlg.showModal();
   await save("draft", draft.value); await save("addendum", addendum.value);
-  const r = await (await fetch(`/api/publish/${THREAD}/run`, {method: "POST"})).json();
+  const r = await (await fetch(`/api/publish/${THREAD}/run`, {method: "POST", headers: {"Content-Type": "application/json"},
+                                                              body: JSON.stringify(createPr ? {create_pr: createPr} : {})})).json();
   if (r.error) finishPublish("failed", "Publish failed", `<b style="color:#cf222e">${esc(r.error)}</b>`);
-};
+}
+publishBtn.onclick = () => startPublish(null);
+// No PR for this branch yet: publish.py stops before changing anything and reports what creating one
+// involves; ask for a title (and optional description), then publish again with it.
+const prDlg = document.getElementById("prdlg"), prTitle = document.getElementById("prtitle");
+function askForPr(setup) {
+  publishState = "idle"; logDlg.close();
+  const b = `<code>${esc(setup.branch)}</code>`, r = `<code>${esc(setup.remote)}</code>`;
+  document.getElementById("prwhy").innerHTML = (setup.on_remote
+    ? `Branch ${b} is on ${r} but has no pull request yet. Publishing opens one`
+    : `Branch ${b} isn't on ${r} yet. Publishing pushes it, opens a pull request`) +
+    ` into <code>${esc(setup.base)}</code> of <code>${esc(setup.repo)}</code>, then posts this comment on it.`;
+  if (!prTitle.value) prTitle.value = setup.title || "";
+  prDlg.showModal(); prTitle.focus(); prTitle.select();
+}
+document.getElementById("prcancel").onclick = () => prDlg.close();
+document.getElementById("prform").addEventListener("submit", e => {
+  e.preventDefault();
+  if (!prTitle.value.trim()) { prTitle.focus(); return; }
+  prDlg.close();
+  startPublish({title: prTitle.value.trim(), body: document.getElementById("prbody").value,
+                draft: document.getElementById("prdraft").checked});
+});
 logDlg.addEventListener("cancel", e => { if (publishState === "running") e.preventDefault(); });  // Esc mid-publish
 logDlg.addEventListener("close", () => {
   if (publishState === "done") { location.href = `/t/${THREAD}`; return; }
@@ -627,6 +677,7 @@ onEvents(async ev => {
   }
   if (ev.type === "publish" && ev.thread === THREAD) {
     const l = ev.log, log = document.getElementById("log");
+    if (l.need_pr) { askForPr(l.need_pr); return; }
     if (l.msg) log.textContent += (l.step ? `[${l.step}] ` : "") + l.msg + "\n";
     if (l.error) {
       log.textContent += "ERROR: " + l.error + "\n";

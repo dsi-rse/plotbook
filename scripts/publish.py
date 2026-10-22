@@ -66,15 +66,84 @@ def read(path):
 # ---------------------------------------------------------------- environment
 
 
-def pr_info(root):
-    try:
-        out = run(["gh", "pr", "view", "--json", "number,url,headRefName,headRepository,headRepositoryOwner"], root, 60)
-    except PublishError as err:
-        raise PublishError("no GitHub PR found for the current branch. plotbook never creates PRs: push the branch "
-                           "and open a PR for it (e.g. `gh pr create --draft`), then publish again.\n(%s)" % err)
-    d = json.loads(out)
+PR_FIELDS = "number,url,headRefName,headRepository,headRepositoryOwner"
+GITHUB_URL_RE = re.compile(r"^(?:https?://|ssh://)?(?:[^@/]+@)?github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
+
+
+class NeedPR(Exception):
+    """The branch has no PR yet; the viewer asks the user for a title and publishes again."""
+
+    def __init__(self, setup):
+        Exception.__init__(self, "no PR for branch %s" % setup["branch"])
+        self.setup = setup
+
+
+def find_pr(root, ref=None):
+    """The PR for the current branch (or for `ref`, a PR URL), or None if gh can't find one."""
+    cp = subprocess.run(["gh", "pr", "view"] + ([ref] if ref else []) + ["--json", PR_FIELDS], cwd=root,
+                        capture_output=True, text=True, timeout=60, env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
+    if cp.returncode != 0:
+        return None
+    d = json.loads(cp.stdout)
     repo = "%s/%s" % (d["headRepositoryOwner"]["login"], d["headRepository"]["name"])
     return {"number": d["number"], "url": d["url"], "repo": repo, "head": d["headRefName"]}
+
+
+def pr_info(root):
+    pr = find_pr(root)
+    if pr is None:
+        pr_setup(root)  # raises with the specific reason when a PR can't be created from here
+        raise PublishError("no GitHub PR found for the current branch; publish from the viewer to create one")
+    return pr
+
+
+def pr_setup(root):
+    """What creating a PR for this branch would involve; PublishError if it can't be done from here."""
+    branch, remote, dest = branch_and_remote(root)
+    url = pbcore.git(["config", "remote.%s.url" % remote], root, check=False).stdout.strip()
+    if not url:
+        raise PublishError("this repository has no git remote %r. Create the GitHub repository and add it "
+                           "(git remote add %s <url>), then publish again." % (remote, remote))
+    m = GITHUB_URL_RE.match(url)
+    if not m:
+        raise PublishError("remote %r (%s) is not a GitHub repository; plotbook publishes to GitHub PRs" % (remote, url))
+    repo = "%s/%s" % m.groups()
+    try:
+        info = json.loads(run(["gh", "repo", "view", repo, "--json", "defaultBranchRef"], root, 60))
+        base = info["defaultBranchRef"]["name"]
+    except (ValueError, KeyError, TypeError):
+        raise PublishError("could not read the default branch of %s" % repo)
+    if dest == base:
+        raise PublishError("branch %s is the default branch of %s. Comments go on a PR, so the analysis needs its "
+                           "own branch: create one (git switch -c <name>), then publish again." % (dest, repo))
+    heads = pbcore.git(["ls-remote", "--heads", remote, "refs/heads/" + dest], root, check=False)
+    return {"repo": repo, "remote": remote, "branch": dest, "base": base,
+            "on_remote": heads.returncode == 0 and bool(heads.stdout.strip()),
+            "title": re.sub(r"[-_/]+", " ", dest).strip().capitalize()}
+
+
+def create_pr(root, spec):
+    """Push the branch (setting its upstream) and open a PR from `spec` = {title, body, draft}."""
+    setup = pr_setup(root)
+    title = (spec.get("title") or "").strip()
+    if not title:
+        raise PublishError("a PR title is required")
+    log("pr", "pushing %s to %s" % (setup["branch"], setup["remote"]))
+    cp = pbcore.git(["push", "-u", setup["remote"], "HEAD:refs/heads/" + setup["branch"]], root, check=False)
+    if cp.returncode != 0:
+        raise PublishError("git push %s %s was rejected (plotbook never force-pushes). If the remote branch has "
+                           "commits you don't have, pull them yourself, then publish again.\n%s"
+                           % (setup["remote"], setup["branch"], cp.stderr.strip()))
+    log("pr", "opening a%s PR into %s:%s" % (" draft" if spec.get("draft") else "", setup["repo"], setup["base"]))
+    out = run(["gh", "pr", "create", "--repo", setup["repo"], "--base", setup["base"], "--head", setup["branch"],
+               "--title", title, "--body", spec.get("body") or ""] + (["--draft"] if spec.get("draft") else []),
+              root, 120)
+    url = next((w for w in out.split() if w.startswith("https://")), out.strip())
+    pr = find_pr(root, url)
+    if pr is None:
+        raise PublishError("created %s, but could not read it back; publish again" % url)
+    log("pr", "created PR #%d %s" % (pr["number"], pr["url"]))
+    return pr
 
 
 def visibility(root, repo):
@@ -293,7 +362,7 @@ def push(root):
     return "%s/%s" % (remote, dest)
 
 
-def publish(root, thread):
+def publish(root, thread, new_pr=None):
     p = paths(root, thread)
     progress = pbcore.read_json(p["progress"]) or {}
     draft, addendum = read(p["draft"]), read(p["addendum"])
@@ -301,7 +370,12 @@ def publish(root, thread):
         raise PublishError("nothing to publish: the comment and the Extra-details pane are both empty")
 
     log("pr", "resolving the PR for the current branch")
-    pr = pr_info(root)
+    pr = find_pr(root)
+    if pr is None:
+        setup = pr_setup(root)
+        if new_pr is None:
+            raise NeedPR(setup)
+        pr = create_pr(root, new_pr)
     private = visibility(root, pr["repo"]) != "public"
     log("pr", "PR #%d in %s (%s)" % (pr["number"], pr["repo"], "private" if private else "public"))
 
@@ -388,6 +462,8 @@ def main():
     ap.add_argument("--root", required=True)
     ap.add_argument("--thread", required=True)
     ap.add_argument("--plan", action="store_true", help="print what would happen, as JSON, and exit")
+    ap.add_argument("--create-pr", metavar="JSON_FILE",
+                    help="if the branch has no PR, push it and open one from {title, body, draft} in this file")
     args = ap.parse_args()
     root = pbcore.find_root(args.root)
     try:
@@ -398,7 +474,14 @@ def main():
         if args.plan:
             print(json.dumps(plan(root, args.thread)))
         else:
-            publish(root, args.thread)
+            new_pr = None
+            if args.create_pr:
+                with open(args.create_pr) as f:
+                    new_pr = json.load(f)
+            publish(root, args.thread, new_pr)
+    except NeedPR as need:
+        emit({"need_pr": need.setup})
+        return 3
     except (PublishError, pbcore.PlotbookError, subprocess.SubprocessError, OSError) as err:
         if args.plan:
             print(json.dumps({"error": str(err)}))

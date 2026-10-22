@@ -43,3 +43,11 @@
   publish = two commits.
 - Subject fallback when no prompt was recorded (`!` commands skip UserPromptSubmit): the newest user text in the
   filtered transcript.
+- **PR creation from the publish dialog** (user request; plotbook previously refused to create PRs). publish.py
+  find_pr() -> None makes pr_setup() check the creatable cases first: the push remote's *raw* URL
+  (`git config remote.R.url`, not get-url, so tests can map a github.com URL via insteadOf) must be GitHub; gh must
+  read the default branch; the branch must not be the default branch. Otherwise it emits {"need_pr": setup} and
+  exits 3 before any commit or push. The viewer shows a title/description/draft form (title prefilled from the
+  branch name, draft UNchecked by default: free-plan private repos reject draft PRs, user's call) and reruns with --create-pr <json>. create_pr pushes `-u` (sets the upstream),
+  then `gh pr create --repo --base --head --title --body [--draft]` (--body is always passed: gh prompts otherwise).
+  Not handled: no remote at all (error), forks (PR base = the push remote's repo).

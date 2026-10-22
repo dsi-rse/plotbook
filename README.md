@@ -1,29 +1,26 @@
 # plotbook
 
-A Claude Code plugin that turns a GitHub PR thread into a scientific lab notebook for exploratory data analysis.
+A Claude Code plugin that turns a GitHub Pull Request (PR) comment thread into a scientific lab notebook for exploratory data analysis.
 
-This tool functionally replaces Jupyter or marimo notebooks for data exploration in an era when we _describe the plots we want to see in words_. Instead of interleaving code and plots, this tool organizes Claude's output and lets you write the analysis narration as a GitHub PR thread with inline plots. The essential point is that you, the human, are still writing the GitHub comments and deciding which plots to show in the narrative, organizing Claude's deluge of output into a purpose-driven story.
+This plugin functionally replaces Jupyter/marimo notebooks for data exploration in a Claude-centric way. Instead of interleaving code and plots, you ask for plots in a Claude Code terminal (or the desktop app) and write the high-level narrative in a GitHub PR. The Claude Code view is full of low-level instructions like "change the colors…" and "overlay the following…" but the GitHub PR view presents your discoveries, turning points, and conclusions. All the details of your analysis flow are git-tracked for reproducibility, but you can organize your thoughts on the comment thread as a human-written/human-readable story.
 
 ## Overview
 
 Here's how it works:
 1. You create an empty directory and a git branch in your GitHub repo.
 2. You start Claude Code in that directory.
-3. `/plotbook:start A` to start a thread named `A`.
-4. A plot viewer opens in a web browser.
-5. You ask for plots and other output to analyze your data.
-6. Those plots and the scripts that made them are named sequentially (`A0001`, `A0002`, etc.) and are browsable in the viewer.
-7. When you reach some sort of conclusion, you draft a comment in the viewer, clicking on plots to add whichever ones are relevant to the conclusion. Pending commits are pushed to GitHub with the comment.
-8. GOTO 5.
-9. Open another Claude Code in another terminal and `/plotbook:start B` to ask for more plots in parallel (`B0001`, `B0002`, etc.). Its web viewer opens in another browser tab.
+3. Use `/plotbook:start A` to start a thread named `A`. The plot viewer opens in a web browser window.
+4. You ask for plots and other output to analyze your data.
+5. Those plots and the scripts that made them are named sequentially (`A0001`, `A0002`, etc.) and are browsable in the viewer.
+6. When you reach some sort of conclusion, you draft a comment in the viewer, clicking on plots to add whichever ones are relevant to the conclusion. Pending commits are git-pushed to GitHub with the comment.
+7. GOTO 4.
+8. Open another Claude Code in another terminal and `/plotbook:start B` to ask for more plots in parallel (`B0001`, `B0002`, etc.). Its web viewer opens in another browser tab.
 
-Your PR comment thread is a high-level view of the important turning points and the plots that support your conclusions.
-
-Claude's detailed descriptions of how each plot was made are hidden inside of `🤖 Extra details 🤖` blocks that you can expand if necessary. The code that generated the plots and the full text of your Claude conversation are checked into git for later forensics, but not the high-level view. (If your repo is public, be careful what you say to Claude!)
-
-The tool will recover if you manually push or add your own commits or comments. It doesn't try to be the only tool you use.
+In the end, the PR comment thread shows your human-written comments and chosen plots directly, but Claude's detailed output is hidden inside of `🤖 Extra details 🤖` blocks. Additionally, the code used to make the plots is checked in for reproducibility or forensics, as well as the full text of your Claude conversation. (If your repo is public, be careful what you say!)
 
 In the Claude Code conversation, you can refer to any plot by its prefix, such as `A0003`. This is useful when you want to ask for "a plot like A0003, but with the following changes..."
+
+The tool will recover if you manually push or add your own commits or comments. It doesn't try to be the only tool you use.
 
 ## How to install
 

@@ -15,11 +15,16 @@ import json, os, sys, shutil
 a = sys.argv[1:]
 log = os.environ["STUB_GH_LOG"]
 open(log, "a").write(json.dumps(a) + "\n")
-if a[:2] == ["pr", "view"]:
+if a[:2] == ["pr", "view"] and a[2] == "--json" and os.environ.get("STUB_NO_PR") and not os.path.exists(log + ".pr"):
+    sys.stderr.write('no pull requests found for branch "analysis-branch"\n'); sys.exit(1)
+elif a[:2] == ["pr", "create"]:
+    open(log + ".pr", "w").close()
+    print("https://github.com/o/r/pull/7")
+elif a[:2] == ["pr", "view"]:
     print(json.dumps({"number": 7, "url": "https://github.com/o/r/pull/7", "headRefName": "analysis-branch",
                       "headRepository": {"name": "r"}, "headRepositoryOwner": {"login": "o"}}))
 elif a[:2] == ["repo", "view"]:
-    print(json.dumps({"visibility": os.environ.get("STUB_VIS", "PRIVATE")}))
+    print(json.dumps({"visibility": os.environ.get("STUB_VIS", "PRIVATE"), "defaultBranchRef": {"name": "main"}}))
 elif a[:2] == ["pr", "comment"]:
     if os.environ.get("STUB_FAIL_COMMENT") and not os.path.exists(log + ".failed"):
         open(log + ".failed", "w").close(); sys.stderr.write("network down\n"); sys.exit(1)
@@ -142,12 +147,16 @@ def test_publish_resumes_after_comment_failure(published_env, monkeypatch):
     assert len(pbcore.published(s.root)) == 1
 
 
-def test_no_pr_is_a_hard_error(published_env, tmp_path):
+def test_broken_gh_is_a_hard_error_not_a_pr_prompt(published_env, repo):
     s, remote, tmp = published_env
-    (tmp / "stubbin" / "gh").write_text("#!/bin/sh\necho 'no pull requests found' >&2\nexit 1\n")
+    (tmp / "stubbin" / "gh").write_text("#!/bin/sh\necho 'To get started with GitHub CLI, please run: gh auth login' >&2\nexit 1\n")
+    git(repo, "remote", "set-url", "origin", "git@github.com:o/r.git")
     write_state(s, "x\n", "")
     cp, logs = run_publish(s)
-    assert cp.returncode == 1 and "no GitHub PR found" in logs[-1]["error"]
+    assert cp.returncode == 1 and "gh repo view failed" in logs[-1]["error"] and "gh auth login" in logs[-1]["error"]
+    git(repo, "remote", "set-url", "origin", str(remote))
+    cp, logs = run_publish(s)
+    assert cp.returncode == 1 and "is not a GitHub repository" in logs[-1]["error"]
 
 
 def test_public_url_form():
@@ -228,3 +237,80 @@ def test_publish_finishes_when_viewer_goes_away(published_env):
     proc.stdout.close()  # the reader (the viewer) is gone before the first log line
     assert proc.wait(timeout=60) == 0
     assert len(pbcore.published(s.root)) == 1
+
+
+@pytest.fixture
+def unpushed_env(new_session, repo, tmp_path, monkeypatch):
+    """A branch never pushed: the remote is a github.com URL that git rewrites to a local bare repo."""
+    remote = tmp_path / "remote.git"
+    git(tmp_path, "init", "-q", "--bare", str(remote))
+    git(repo, "remote", "add", "origin", "https://github.com/o/r.git")
+    git(repo, "config", "url.%s.insteadOf" % remote, "https://github.com/o/r.git")
+    stub = tmp_path / "stubbin"
+    stub.mkdir()
+    (stub / "gh").write_text(STUB_GH)
+    (stub / "gh").chmod(0o755)
+    monkeypatch.setenv("PATH", "%s:%s" % (stub, os.environ["PATH"]))
+    monkeypatch.setenv("STUB_GH_LOG", str(tmp_path / "gh.log"))
+    monkeypatch.setenv("STUB_NO_PR", "1")
+    s = new_session()
+    s.prompt("/plotbook:start primary")
+    s.stop()
+    s.prompt("a plot")
+    make_plot(s, "primary", 1)
+    s.stop()
+    return s, remote, tmp_path
+
+
+def gh_calls(tmp):
+    return [json.loads(l) for l in open(tmp / "gh.log")]
+
+
+def test_no_pr_asks_for_one_then_creates_it(unpushed_env, repo):
+    s, remote, tmp = unpushed_env
+    write_state(s, '<img src="plots/primary0001-demo.svg" alt="x">\n', "")
+    n = len(commits(repo))
+    cp, logs = run_publish(s)
+    assert cp.returncode == 3, logs
+    assert logs[-1]["need_pr"] == {"repo": "o/r", "remote": "origin", "branch": "analysis-branch", "base": "main",
+                                   "on_remote": False, "title": "Analysis branch"}
+    # Nothing changed: no commit, no push, nothing created.
+    assert len(commits(repo)) == n and git(remote, "branch") == ""
+    assert not any(c[:2] == ["pr", "create"] for c in gh_calls(tmp))
+
+    spec = tmp / "newpr.json"
+    spec.write_text(json.dumps({"title": "Penguin masses", "body": "Exploring.", "draft": True}))
+    cp, logs = run_publish(s, "--create-pr", str(spec))
+    assert cp.returncode == 0 and logs[-1].get("done"), logs
+    create = next(c for c in gh_calls(tmp) if c[:2] == ["pr", "create"])
+    assert create[2:] == ["--repo", "o/r", "--base", "main", "--head", "analysis-branch",
+                          "--title", "Penguin masses", "--body", "Exploring.", "--draft"]
+    assert git(repo, "config", "branch.analysis-branch.remote").strip() == "origin"  # upstream set
+    assert git(repo, "rev-parse", "HEAD") == git(remote, "rev-parse", "analysis-branch")
+    assert pbcore.published(s.root)[-1]["pr"] == 7
+
+
+def test_branch_on_remote_without_pr(unpushed_env, repo):
+    s, remote, tmp = unpushed_env
+    git(repo, "push", "-q", "origin", "analysis-branch")  # pushed by hand, no upstream, no PR
+    write_state(s, "Hello\n", "")
+    cp, logs = run_publish(s)
+    assert cp.returncode == 3 and logs[-1]["need_pr"]["on_remote"] is True
+    spec = tmp / "newpr.json"
+    spec.write_text(json.dumps({"title": "T", "body": "", "draft": False}))
+    cp, logs = run_publish(s, "--create-pr", str(spec))
+    assert logs[-1].get("done"), logs
+    create = next(c for c in gh_calls(tmp) if c[:2] == ["pr", "create"])
+    assert "--draft" not in create and create[create.index("--body") + 1] == ""
+
+
+def test_no_pr_on_default_branch_or_without_remote_is_an_error(unpushed_env, repo):
+    s, remote, tmp = unpushed_env
+    write_state(s, "Hello\n", "")
+    git(repo, "branch", "-m", "main")
+    cp, logs = run_publish(s)
+    assert cp.returncode == 1 and "default branch of o/r" in logs[-1]["error"]
+    git(repo, "branch", "-m", "analysis-branch")
+    git(repo, "remote", "remove", "origin")
+    cp, logs = run_publish(s)
+    assert cp.returncode == 1 and "no git remote 'origin'" in logs[-1]["error"]
