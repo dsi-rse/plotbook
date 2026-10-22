@@ -31,3 +31,7 @@
 - Delta allocation with open(path, "x") followed by a write raced against a concurrent allocator's delta_tree()
   check, which saw an empty file and raised malformed (a flaky test_concurrent_allocation_is_distinct under load).
   Fixed: write a temp file, then os.link() it into place (atomic and fails if the name exists).
+- Preview-rendering tests skip via the `svg_converter` fixture only when publish.converter() finds nothing. Don't
+  importorskip("cairosvg"): on the dev machine the test python has no cairosvg, and new_session strips PATH dirs
+  containing `uv` (miniforge3/bin, which also holds rsvg-convert), so the tests render with /usr/bin/inkscape.
+  pytest 9's importorskip skips only on ModuleNotFoundError; cairosvg without libcairo raises OSError.

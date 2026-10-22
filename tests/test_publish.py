@@ -36,6 +36,16 @@ else:
 
 
 @pytest.fixture
+def svg_converter(new_session):
+    """Skip unless publish.py can render PNG previews: cairosvg (in this interpreter, which publish.py
+    also runs under), else rsvg-convert or inkscape on the PATH the tests use (after new_session's edit)."""
+    conv = publish.converter()
+    if conv is None:
+        pytest.skip("no SVG→PNG converter: install cairosvg (with the cairo library), rsvg-convert, or inkscape")
+    return conv
+
+
+@pytest.fixture
 def published_env(new_session, repo, tmp_path, monkeypatch):
     remote = tmp_path / "remote.git"
     git(tmp_path, "init", "-q", "--bare", str(remote))
@@ -72,7 +82,7 @@ def run_publish(s, *extra):
     return cp, [json.loads(l) for l in cp.stdout.splitlines() if l.strip()]
 
 
-def test_publish_end_to_end(published_env, repo):
+def test_publish_end_to_end(published_env, repo, svg_converter):
     s, remote, tmp = published_env
     draft = ("Masses look bimodal.\n\n<img src=\"plots/primary0001-demo.svg\" alt=\"primary0001-demo.svg\" width=\"600\">\n\n"
              "And the map: [primary0002-map.geojson](plots/primary0002-map.geojson)\n")
@@ -134,7 +144,7 @@ def test_empty_addendum_omits_details_and_manual_push_keeps_divider(published_en
     assert pbcore.last_through(s.root, "primary") == through
 
 
-def test_publish_resumes_after_comment_failure(published_env, monkeypatch):
+def test_publish_resumes_after_comment_failure(published_env, monkeypatch, svg_converter):
     s, remote, tmp = published_env
     monkeypatch.setenv("STUB_FAIL_COMMENT", "1")
     write_state(s, "Hello <img src=\"plots/primary0001-demo.svg\" alt=\"x\">\n", "")
@@ -190,7 +200,7 @@ def test_repro_in_worktree_with_dirty_tree(new_session, repo):
     assert git(repo, "worktree", "list").count("\n") == 1
 
 
-def test_one_turn_then_publish_is_two_commits(published_env, repo):
+def test_one_turn_then_publish_is_two_commits(published_env, repo, svg_converter):
     s, remote, tmp = published_env
     s.prompt("one more plot")
     make_plot(s, "primary", 4)
@@ -266,7 +276,7 @@ def gh_calls(tmp):
     return [json.loads(l) for l in open(tmp / "gh.log")]
 
 
-def test_no_pr_asks_for_one_then_creates_it(unpushed_env, repo):
+def test_no_pr_asks_for_one_then_creates_it(unpushed_env, repo, svg_converter):
     s, remote, tmp = unpushed_env
     write_state(s, '<img src="plots/primary0001-demo.svg" alt="x">\n', "")
     n = len(commits(repo))
