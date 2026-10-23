@@ -5,6 +5,7 @@
 #   "uvicorn>=0.30",
 #   "watchfiles>=0.24",
 #   "cairosvg>=2.7",
+#   "matplotlib>=3.5",  # only for its bundled fonts: publish renders PNG previews with them
 #   "markdown-it-py>=3",
 # ]
 # ///

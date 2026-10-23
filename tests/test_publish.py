@@ -324,3 +324,22 @@ def test_no_pr_on_default_branch_or_without_remote_is_an_error(unpushed_env, rep
     git(repo, "remote", "remove", "origin")
     cp, logs = run_publish(s)
     assert cp.returncode == 1 and "no git remote 'origin'" in logs[-1]["error"]
+
+
+def test_preview_fonts_found_when_first_python_lacks_matplotlib(tmp_path):
+    # Like the viewer under uv: its own interpreter has no matplotlib, the first python3 on PATH is
+    # that same environment's, and the one that has matplotlib is a symlink to the same base binary.
+    pytest.importorskip("matplotlib")
+    first, later = tmp_path / "venvbin", tmp_path / "basebin"
+    first.mkdir()
+    later.mkdir()
+    (first / "python3").write_text("#!/bin/sh\nexit 1\n")
+    (first / "python3").chmod(0o755)
+    os.symlink(sys.executable, later / "python3")
+    code = ("import sys; sys.modules['matplotlib'] = None; sys.path.insert(0, %r); import publish; "
+            "print(publish.matplotlib_data_path())" % SCRIPTS)
+    cp = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                        env=dict(os.environ, PATH="%s:%s" % (first, later)))
+    import matplotlib
+
+    assert cp.stdout.strip() == matplotlib.get_data_path(), cp.stderr

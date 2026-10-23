@@ -39,3 +39,8 @@
   so the script fell through to `exit 0` and refusals (exit 2) never blocked the prompt. Now `| python3 ...; exit $?`.
 - 2026-10-23: a stray /tmp/.plotbook/ (thread A drafts and archives from 10-21; not made by tests) made every pytest tmp
   repo look nested in an analysis. Left in place, since it may be the user's. Fixed for good by stopping find_root at `.git`.
+- Font isolation silently didn't run for the live viewer (italic previews again): `uv run` puts the viewer env's bin first
+  on PATH, so `python3` there was the viewer env (no matplotlib) and the lookup gave up. My earlier check passed only
+  because I ran it from a shell where python3 was miniforge's. Fixed: matplotlib is in the viewer's deps (in-process
+  import first), then every python3/python on PATH is tried. De-duplicate by abspath, NOT realpath: a venv python
+  symlinks to its base interpreter, which has a different sys.path. Verify with the viewer env's interpreter and PATH.

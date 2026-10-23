@@ -178,6 +178,35 @@ FONTS_CONF = """<?xml version="1.0"?>
 """
 
 
+def matplotlib_data_path():
+    """matplotlib's data dir: from this interpreter (the viewer's environment declares matplotlib),
+    else from any python3/python on PATH. Every PATH entry is tried, not just the first: uv puts
+    the viewer's environment first, and an older one may lack matplotlib."""
+    try:
+        import matplotlib
+
+        return matplotlib.get_data_path()
+    except ImportError:
+        pass
+    # Compare paths as written, not resolved: a venv's python is a symlink to its base interpreter,
+    # which has a different sys.path (and may well have matplotlib).
+    seen = {os.path.abspath(sys.executable)}
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        for name in ("python3", "python"):
+            exe = os.path.abspath(os.path.join(d, name))
+            if not os.access(exe, os.X_OK) or exe in seen:
+                continue
+            seen.add(exe)
+            try:
+                cp = subprocess.run([exe, "-c", "import matplotlib; print(matplotlib.get_data_path())"],
+                                    capture_output=True, text=True, timeout=60)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if cp.returncode == 0 and cp.stdout.strip():
+                return cp.stdout.strip()
+    return None
+
+
 def isolate_fonts(root):
     """Make every SVG→PNG converter resolve fonts from matplotlib's bundled set, not the system's.
 
@@ -187,15 +216,7 @@ def isolate_fonts(root):
     """
     from xml.sax.saxutils import escape
 
-    data = None
-    for py in ("python3", "python"):
-        exe = shutil.which(py)
-        if exe:
-            cp = subprocess.run([exe, "-c", "import matplotlib; print(matplotlib.get_data_path())"],
-                                capture_output=True, text=True, timeout=60)
-            if cp.returncode == 0 and cp.stdout.strip():
-                data = cp.stdout.strip()
-                break
+    data = matplotlib_data_path()
     fonts = os.path.join(data, "fonts", "ttf") if data else None
     if not fonts or not os.path.isdir(fonts):
         return None
