@@ -15,9 +15,10 @@ def main(argv):
     if len(argv) < 2 or not argv[1].strip():
         sys.exit('usage: plotbook-note <thread> "<one-line summary of the request>"')
     thread, summary = argv[0], " ".join(argv[1:])
-    root = pbcore.find_root(os.getcwd())
-    if root is None:
-        sys.exit("plotbook-note: not inside a plotbook analysis (no .plotbook/ above %s)" % os.getcwd())
+    try:
+        root = pbcore.tool_root(thread)
+    except pbcore.PlotbookError as err:
+        sys.exit("plotbook-note: %s" % err)
     if not os.path.exists(pbcore.claim_path(root, thread)):
         sys.exit("plotbook-note: thread %r is not claimed in %s" % (thread, root))
     summary = pbcore.one_line(summary, 72)

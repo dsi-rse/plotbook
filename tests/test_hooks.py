@@ -8,8 +8,8 @@ from conftest import commits, git
 
 import pbcore
 
-PLOT = ('"""{name}"""\nimport os, sys\n'
-        'if not os.path.isdir("plots"): sys.exit("plotbook: run from the analysis root")\n'
+PLOT = ('"""{name}"""\nimport os\n'
+        'os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))\n'
         'exec(compile(open(_f := "scripts/shared_{leaf:04d}.py").read(), _f, "exec"))\n'
         'fig, ax = plt.subplots()\nax.plot([1, 2, {k}])\nsave(fig)\n')
 
@@ -17,7 +17,7 @@ PLOT = ('"""{name}"""\nimport os, sys\n'
 def make_plot(s, thread, n, slug="demo", leaf=0, k=3):
     rel = "scripts/%s%04d-%s.py" % (thread, n, slug)
     assert s.write(rel, PLOT.format(name=rel, leaf=leaf, k=k)) is None
-    r = s.run("python3", rel)
+    r = s.run("python3", os.path.relpath(os.path.join(s.root, rel), s.cwd))  # from wherever the session runs
     assert r.returncode == 0, r.stderr
     return rel
 
@@ -291,3 +291,56 @@ def test_sessionend_stops_viewer_after_last_live_session(new_session, tmp_path):
     r = a.prompt("resumed")
     assert "thread=primary" in r.stdout and "viewer not started" in r.stdout
     assert "viewer not started" not in a.prompt("again").stdout
+
+
+def test_repo_root_session_with_analysis_dir(new_session, repo):
+    s = new_session(root=repo / "nb", cwd=repo)
+    r = s.prompt("/plotbook:start A nb")
+    assert r.returncode == 0, r.stderr
+    nb = os.path.realpath(repo / "nb")
+    assert "dir=%s " % nb in r.stdout and os.path.isdir(os.path.join(nb, ".plotbook"))
+    reg = json.load(open(repo / ".git" / "plotbook" / "sessions" / (s.id + ".json")))
+    assert reg["root"] == nb and reg["thread"] == "A"
+    s.stop()
+    assert "nb/scripts/shared_0000.py" in commits(repo)[0][1]
+    # A turn from the repo root: guard, journal, a script run from the repo root, the note, the commit.
+    assert "dir=%s " % nb in s.prompt("first plot").stdout
+    make_plot(s, "A", 1)
+    assert s.run("plotbook-note", "A", "histogram of masses").returncode == 0
+    s.stop()
+    subject, files = commits(repo)[0]
+    assert subject == "[A0001] histogram of masses"
+    assert sorted(f for f in files if not f.startswith("nb/.plotbook")) == ["nb/plots/A0001-demo.svg", "nb/scripts/A0001-demo.py"]
+    assert "append-only" in s.write("scripts/shared_0000.py", "# edited\n")
+    d = s.run("plotbook-delta", "--thread", "A", "--parent", "0").stdout.split()[0]
+    assert d == "nb/scripts/shared_0001.py"  # relative to where it ran
+    # Resume after SessionEnd finds the analysis again.
+    assert s.hook("sync_transcript.py", hook_event_name="SessionEnd").returncode == 0
+    assert "thread=A dir=%s " % nb in s.prompt("resumed").stdout
+    # A new session (e.g. after /clear) gets thread A back in nb without naming the directory.
+    assert s.hook("sync_transcript.py", hook_event_name="SessionEnd").returncode == 0
+    s2 = new_session(root=repo / "nb", cwd=repo)
+    r = s2.prompt("/plotbook:start A")
+    assert r.returncode == 0 and "dir=%s " % nb in r.stdout, r.stderr
+    # Sessions at the repo root that never claimed a thread are left alone.
+    other = new_session(root=repo / "nb", cwd=repo)
+    r = other.prompt("unrelated question")
+    assert r.returncode == 0 and r.stdout == ""
+    assert other.stop().returncode == 0 and commits(repo)[0][0] == subject
+
+
+def test_start_argument_errors_and_moving_analyses(new_session, repo, tmp_path):
+    s = new_session(root=repo / "nb", cwd=repo)
+    for args, msg in [("", "usage"), ("A nb extra", "usage"), ("A --bogus", "usage"),
+                      ("A ../elsewhere", "not inside a git repository")]:
+        r = s.prompt(("/plotbook:start " + args).strip())
+        assert r.returncode == 2 and msg in r.stderr, (args, r.stderr)
+    assert not os.path.exists(tmp_path / "elsewhere")
+    assert s.prompt("/plotbook:start A nb").returncode == 0
+    r = s.prompt("/plotbook:start A nb/scripts")
+    assert r.returncode == 2 and "can't nest" in r.stderr
+    # Moving this session to another analysis releases its thread in the first one.
+    r = s.prompt("/plotbook:start B other")
+    assert r.returncode == 0 and 'Released this session\'s previous thread "A"' in r.stdout
+    assert pbcore.session_thread(str(repo / "nb"), s.id) is None
+    assert pbcore.session_thread(str(repo / "other"), s.id) == "B"

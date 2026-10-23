@@ -28,9 +28,11 @@
   restarts it after resume/crash, preferring the old port. Also fires on /clear (reason "clear"); /plotbook:start revives it.
   A running publish survives: the viewer launches it with Popen(start_new_session) + a daemon reader thread, and
   publish.emit() swallows BrokenPipe.
-- **Plot-script cwd guard** (deviation from the spec): from `scripts/`, the canonical exec line fails with FileNotFoundError
-  before shared_0000's guard can run. Plot scripts therefore carry a one-line `if not os.path.isdir("plots"): sys.exit(...)`
-  before the exec line (conventions skill header template). shared_0000 keeps its guard too.
+- **Plot-script header chdir** (replaces the earlier cwd-guard deviation): plot scripts carry
+  `os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))` before the exec line, so they run from any
+  directory (`python <dir>/scripts/T0005.py`) with analysis-relative paths. Chosen over telling the model to
+  `cd dir && ...`, because compound cd commands can trigger permission prompts. Old scripts with the guard still work
+  from the analysis root; shared_0000 keeps its guard.
 - **Repro** symlinks the analysis dir's untracked top-level entries (data files) into the worktree. It compares outputs
   ignoring `<metadata>`; `svg.hashsalt` is fixed in shared_0000 for deterministic ids.
 - **Commit policy** (the user's request; overrides spec Decision 3's "every turn commits" and the §9 step 8 meta-commit):
@@ -56,3 +58,13 @@
   the walrus can't clobber a user variable. Per-analysis: pbcore.exec_style(root) = "legacy" when the analysis's
   immutable shared_0000.py lacks `_f := ` (scaffolded earlier, e.g. greenwave), because its provenance regex only knows
   the old line. Writes (guard, alloc_delta) require the analysis's style; reads (delta_tree, repro) accept both.
+- **`/plotbook:start <thread> [<analysis-dir>] [--steal]`** (user request; README assumes Claude Code at the repo root).
+  The dir is relative to the session cwd and created if missing. It must be inside the git repo and must not nest in
+  another analysis. Without it: the analysis containing cwd, else this session's registered analysis, else the one
+  analysis where the thread was claimed (resuming after /clear), else cwd.
+  Session registry: `<git-common-dir>/plotbook/sessions/<sid>.json` = {root, thread}. It's written by claim(), kept at
+  SessionEnd (resume needs it), and pruned after 90 days. pbcore.hook_root checks the registry first, then
+  find_root(cwd). guard.sh also runs Python when that registry dir exists. The immutability guard takes the root from
+  the *file's* path. CLI tools use pbcore.tool_root(thread): find_root(cwd), else a unique registry match.
+  Context line carries `dir=<abs root>`. Moving a session to another analysis releases its old claim.
+- find_root (and guard.sh) stop at a directory containing `.git`: a .plotbook/ above the repo is never an analysis.

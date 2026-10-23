@@ -47,12 +47,15 @@ def session_record_path(root, session_id):
     return pbcore.state_dir(root, "sessions", session_id + ".thread")
 
 
+def invalid_thread_message(thread):
+    return ("invalid thread name %r: use letters (and inner - or _), starting and ending with a letter; "
+            "'shared' is reserved" % thread)
+
+
 def claim(root, thread, session_id, steal=False):
     """Claim `thread` for `session_id`. Raises ClaimRefused if a live session holds it."""
     if not pbcore.valid_thread(thread):
-        raise ClaimRefused(
-            "invalid thread name %r: use letters (and inner - or _), starting and ending with a letter; "
-            "'shared' is reserved" % thread)
+        raise ClaimRefused(invalid_thread_message(thread))
     path = pbcore.claim_path(root, thread)
     pbcore.ensure_dir(os.path.dirname(path))
     lock_fd = os.open(pbcore.state_dir(root, "claims", ".lock"), os.O_RDWR | os.O_CREAT, 0o644)
@@ -76,7 +79,16 @@ def claim(root, thread, session_id, steal=False):
             f.write(thread + "\n")
     finally:
         os.close(lock_fd)
+    pbcore.register_session(root, session_id, thread)
     return other if other and other != thread else None
+
+
+def release_session(root, session_id):
+    """Release whatever thread `session_id` holds in `root`; returns that thread or None."""
+    thread = pbcore.session_thread(root, session_id)
+    if thread is not None:
+        os.remove(pbcore.claim_path(root, thread))
+    return thread
 
 
 def reclaim_on_resume(root, session_id):
@@ -201,9 +213,10 @@ def main(argv=None):
     v.add_argument("--draft", action="store_true", help="the thread's draft-comment view")
     v.add_argument("--open", action="store_true", help="also open it in a browser when one is available")
     args = ap.parse_args(argv)
-    root = pbcore.find_root(os.getcwd())
-    if root is None:
-        sys.exit("not inside a plotbook analysis")
+    try:
+        root = pbcore.tool_root(args.thread)
+    except pbcore.PlotbookError as err:
+        sys.exit("plotbook: %s" % err)
     if args.cmd == "release":
         p = pbcore.claim_path(root, args.thread)
         if os.path.exists(p):

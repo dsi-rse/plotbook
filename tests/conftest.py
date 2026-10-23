@@ -33,19 +33,20 @@ def repo(tmp_path):
 class Session:
     """Simulates one Claude Code session: hook calls plus a fake source transcript."""
 
-    def __init__(self, root, tmp_path):
+    def __init__(self, root, tmp_path, cwd=None):
         self.root = str(root)
+        self.cwd = str(cwd or root)  # where Claude Code runs (the repo root, or the analysis itself)
         self.id = str(uuid.uuid4())
         self.transcript = str(tmp_path / ("%s.jsonl" % self.id))
         open(self.transcript, "w").close()
 
     def hook(self, script, **extra):
-        payload = {"session_id": self.id, "transcript_path": self.transcript, "cwd": self.root}
+        payload = {"session_id": self.id, "transcript_path": self.transcript, "cwd": self.cwd}
         payload.update(extra)
         env = dict(os.environ)
         env.pop("PLOTBOOK_HEADLESS", None)
         return subprocess.run([os.path.join(SCRIPTS, "guard.sh"), script], input=json.dumps(payload),
-                              cwd=self.root, capture_output=True, text=True, env=env)
+                              cwd=self.cwd, capture_output=True, text=True, env=env)
 
     def say(self, role, text, **kw):
         entry = {"type": role, "timestamp": "2026-10-21T00:00:00Z", "sessionId": self.id,
@@ -79,7 +80,7 @@ class Session:
 
     def run(self, *cmd):
         self.tool("Bash", command=" ".join(cmd))
-        return subprocess.run(list(cmd), cwd=self.root, capture_output=True, text=True,
+        return subprocess.run(list(cmd), cwd=self.cwd, capture_output=True, text=True,
                               env=dict(os.environ, PATH=os.path.join(PLUGIN, "bin") + os.pathsep + os.environ["PATH"]))
 
     def stop(self, reply="done"):
@@ -92,8 +93,8 @@ def new_session(repo, tmp_path, monkeypatch):
     # No viewer during tests: make `uv` unfindable for the start hook.
     monkeypatch.setenv("PATH", ":".join(p for p in os.environ["PATH"].split(":") if not os.path.exists(os.path.join(p, "uv"))))
 
-    def make():
-        return Session(repo / "analysis", tmp_path)
+    def make(root=None, cwd=None):
+        return Session(root or repo / "analysis", tmp_path, cwd)
 
     return make
 

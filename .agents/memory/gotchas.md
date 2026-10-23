@@ -35,3 +35,7 @@
   importorskip("cairosvg"): on the dev machine the test python has no cairosvg, and new_session strips PATH dirs
   containing `uv` (miniforge3/bin, which also holds rsvg-convert), so the tests render with /usr/bin/inkscape.
   pytest 9's importorskip skips only on ModuleNotFoundError; cairosvg without libcairo raises OSError.
+- guard.sh used `printf ... | exec python3 turn_start.py` for the first /plotbook:start. The pipeline runs in a subshell,
+  so the script fell through to `exit 0` and refusals (exit 2) never blocked the prompt. Now `| python3 ...; exit $?`.
+- 2026-10-23: a stray /tmp/.plotbook/ (thread A drafts and archives from 10-21; not made by tests) made every pytest tmp
+  repo look nested in an analysis. Left in place, since it may be the user's. Fixed for good by stopping find_root at `.git`.

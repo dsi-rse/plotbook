@@ -49,17 +49,19 @@ def main(argv=None):
     ap.add_argument("--thread", required=True)
     ap.add_argument("--parent", required=True, help="parent delta number, e.g. 0007 or 7")
     args = ap.parse_args(argv)
-    root = pbcore.find_root(os.getcwd())
-    if root is None:
-        sys.exit("plotbook-delta: not inside a plotbook analysis (no .plotbook/ above %s)" % os.getcwd())
     if not pbcore.valid_thread(args.thread):
         sys.exit("plotbook-delta: invalid thread name %r" % args.thread)
+    try:
+        root = pbcore.tool_root(args.thread)
+    except pbcore.PlotbookError as err:
+        sys.exit("plotbook-delta: %s" % err)
     try:
         parent = int(os.path.basename(args.parent).replace("shared_", "").replace(".py", ""))
         m, rel = allocate(root, args.thread, parent)
     except (pbcore.PlotbookError, ValueError) as err:
         sys.exit("plotbook-delta: %s" % err)
-    print(rel)
+    shown = os.path.relpath(os.path.join(root, rel))  # relative to where the tool was run, if inside it
+    print(shown if not shown.startswith("..") else os.path.join(root, rel))
     style = pbcore.exec_style(root)
     print("Its first line is already %s; add only the changed definitions below it."
           % pbcore.canonical_exec_line(parent, style))

@@ -100,12 +100,18 @@ def check(root, thread, tool, ti):
 
 def main():
     inp = pbcore.hook_input()
-    root = pbcore.hook_root(inp)
+    ti = dict(inp.get("tool_input") or {})
+    key = "file_path" if ti.get("file_path") else "notebook_path"
+    if not ti.get(key):
+        return 0
+    # The rules belong to the analysis the file is in, wherever this session runs or is registered.
+    ti[key] = os.path.abspath(os.path.join(inp.get("cwd") or os.getcwd(), ti[key]))
+    root = pbcore.find_root(os.path.dirname(ti[key]))
     if root is None:
         return 0
     thread = pbcore.session_thread(root, inp.get("session_id")) if inp.get("session_id") else None
     try:
-        reason = check(root, thread, inp.get("tool_name"), inp.get("tool_input") or {})
+        reason = check(root, thread, inp.get("tool_name"), ti)
     except (OSError, pbcore.PlotbookError) as err:
         print("plotbook guard error (allowing): %s" % err, file=sys.stderr)
         return 0

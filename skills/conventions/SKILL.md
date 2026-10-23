@@ -4,14 +4,17 @@ allowed-tools: Bash(plotbook-note *), Bash(plotbook-delta *), Bash(plotbook-view
 ---
 # plotbook conventions
 
-This directory is an exploratory-analysis lab notebook. Every prompt brings a context line,
-`[plotbook] thread=T next=T0005 leaf=shared_0007`, that says which thread this session owns,
-the next artifact name, and the shared-library leaf to pin.
+The analysis directory is an exploratory-analysis lab notebook. Every prompt brings a context line,
+`[plotbook] thread=T dir=/path/to/analysis next=T0005 leaf=shared_0007`, that says which thread this
+session owns, the analysis directory, the next artifact name, and the shared-library leaf to pin.
 
 ## Layout and running
+- Paths below (`plots/`, `scripts/`, `.plotbook/`) are inside the analysis directory, `dir=`. Claude Code
+  may be running elsewhere (usually the repo root), so in file tools and commands write them as `<dir>/scripts/...`.
 - `plots/`: outputs only. `scripts/`: plot scripts and shared deltas. `.plotbook/`: infrastructure; never edit it.
-- Run every script **from the analysis root**: `python scripts/T0005-slug.py`. Paths in scripts are root-relative.
-- Don't create anything else at the analysis root.
+- Run scripts as `python <dir>/scripts/T0005-slug.py`, from wherever you are; don't `cd`. The header's
+  `os.chdir` line makes every path inside a script relative to the analysis directory.
+- Don't create anything else at the top of the analysis directory.
 
 ## Artifacts
 - Name new work `T{n:04d}-{slug}`, using the `next=` number. The slug is short kebab-case, e.g. `primary0005-mass-by-island`.
@@ -27,14 +30,14 @@ the next artifact name, and the shared-library leaf to pin.
 - How scripts load data is up to you and the user. plotbook imposes nothing.
 
 ## Script header
-Every plot script starts like this. Imports go first. The cwd guard comes next, because the exec line
-would otherwise fail with a bare FileNotFoundError when the script is run from the wrong directory.
-Then comes the library pin:
+Every plot script starts like this. Imports go first. The `os.chdir` line comes next, so that the
+script runs from any directory and its paths (the exec line's included) are relative to the analysis
+directory. Then comes the library pin:
 ```python
 """primary0005: penguin mass by island"""
-import os, sys
+import os
 import numpy as np
-if not os.path.isdir("plots"): sys.exit("plotbook: run from the analysis root: python scripts/" + os.path.basename(__file__))
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # the analysis directory
 exec(compile(open(_f := "scripts/shared_0007.py").read(), _f, "exec"))
 ```
 
@@ -66,15 +69,15 @@ exec(compile(open(_f := "scripts/shared_0007.py").read(), _f, "exec"))
   are summarized separately for the "🤖 Extra details" block.
 
 ## Threads
-- Each Claude Code session owns one thread, claimed by the user with `/plotbook:start <thread>`.
+- Each Claude Code session owns one thread, claimed by the user with `/plotbook:start <thread> [<analysis-dir>]`.
   If there's no `thread=` context line, tell the user to run it. Don't produce numbered artifacts until then.
-- The viewer URL is in `.plotbook/state/viewer.json`. Run `plotbook-viewer T` to (re)start the viewer and print its URL.
+- The viewer URL is in `<dir>/.plotbook/state/viewer.json`. Run `plotbook-viewer T` to (re)start the viewer and print its URL.
 
 ## Provenance questions
 For questions like "what was I asking for when primary0042 was made?" or "why did we choose that cut?":
-- `grep -n "primary0042" .plotbook/transcripts/*.jsonl` finds the dialogue. Each line is JSON:
+- `grep -n "primary0042" <dir>/.plotbook/transcripts/*.jsonl` finds the dialogue. Each line is JSON:
   `{"role","ts","text"}`, or `{"event":"wrote"|"ran",...}` anchors. Read the user turns around the anchor.
-- `.plotbook/published.jsonl` lists which artifacts were published in which PR comment (`comment_url`).
+- `<dir>/.plotbook/published.jsonl` lists which artifacts were published in which PR comment (`comment_url`).
 - SVGs carry JSON provenance in their `<dc:description>` metadata: script, leaf, commit, session, and time.
 - You can't run git log yourself. If the user needs commit history, suggest they run
-  `! git log --follow -- plots/<file>`.
+  `! git log --follow -- <dir>/plots/<file>`.

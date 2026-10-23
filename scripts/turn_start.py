@@ -6,13 +6,17 @@ to the user (used when a thread claim is refused).
 
 import os
 import re
+import shlex
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import claim_thread  # noqa: E402
 import pbcore  # noqa: E402
 
-START_RE = re.compile(r"^\s*/plotbook:start(?:\s+(?P<thread>[^\s-]\S*))?(?P<steal>\s+--steal)?\s*$")
+START_RE = re.compile(r"^\s*/plotbook:start(?:\s+(?P<args>.*?))?\s*$", re.S)
+USAGE = ("usage: /plotbook:start <thread> [<analysis-dir>] [--steal]   (e.g. /plotbook:start primary analysis)\n"
+         "<analysis-dir> is relative to where Claude Code is running; without it, the analysis is the directory\n"
+         "Claude Code runs in (or the analysis containing it, or the one where <thread> was last claimed).")
 
 
 def record_prompt(root, session_id, prompt):
@@ -24,30 +28,67 @@ def record_prompt(root, session_id, prompt):
 
 def context_line(root, thread):
     leaf = pbcore.thread_leaf(root, thread)
-    return ('[plotbook] thread=%s next=%s%04d leaf=%s; follow the plotbook:conventions skill; '
+    return ('[plotbook] thread=%s dir=%s next=%s%04d leaf=%s; follow the plotbook:conventions skill; '
             'end file-producing turns with: plotbook-note %s "<one-line summary of the request>"'
-            % (thread, thread, pbcore.next_number(root, thread),
+            % (thread, root, thread, pbcore.next_number(root, thread),
                "shared_%04d" % leaf if leaf is not None else "none", thread))
+
+
+def parse_start(args):
+    """(thread, analysis_dir or None, steal) from the text after /plotbook:start; ValueError if malformed."""
+    words = shlex.split(args or "")
+    steal = "--steal" in words
+    words = [w for w in words if w != "--steal"]
+    if not words or len(words) > 2 or any(w.startswith("-") for w in words):
+        raise ValueError(USAGE)
+    return words[0], (words[1] if len(words) == 2 else None), steal
+
+
+def start_root(cwd, sid, thread, analysis_dir):
+    """The analysis directory `/plotbook:start` should use (may not exist yet). ValueError if unusable."""
+    if analysis_dir is not None:
+        target = os.path.realpath(os.path.join(cwd, os.path.expanduser(analysis_dir)))
+    else:
+        roots = pbcore.thread_roots(cwd, thread)
+        target = (pbcore.find_root(cwd) or pbcore.registered_root(cwd, sid)
+                  or (roots[0] if len(roots) == 1 else None) or os.path.realpath(cwd))
+    existing = target
+    while not os.path.isdir(existing):
+        existing = os.path.dirname(existing)
+    top = pbcore.git(["rev-parse", "--show-toplevel"], existing, check=False)
+    if top.returncode != 0:
+        raise ValueError("%s is not inside a git repository. Create the analysis branch (and its PR) first; "
+                         "plotbook commits each turn to it." % target)
+    top = os.path.realpath(top.stdout.strip())
+    if os.path.relpath(target, top).startswith(".."):
+        raise ValueError("%s is outside the git repository %s" % (target, top))
+    enclosing = pbcore.find_root(target)
+    if enclosing is not None and enclosing != target:
+        raise ValueError("%s is inside the analysis %s; analyses can't nest. Use %s itself, or another directory."
+                         % (target, enclosing, enclosing))
+    return target
 
 
 def start(inp, m):
     cwd = inp.get("cwd") or os.getcwd()
     sid = inp.get("session_id")
-    thread = m.group("thread")
-    if not thread:
-        print("usage: /plotbook:start <thread>   (e.g. /plotbook:start primary)", file=sys.stderr)
+    try:
+        thread, analysis_dir, steal = parse_start(m.group("args"))
+        if not pbcore.valid_thread(thread):
+            raise claim_thread.ClaimRefused(claim_thread.invalid_thread_message(thread))
+        root = start_root(cwd, sid, thread, analysis_dir)
+    except (ValueError, claim_thread.ClaimRefused) as err:
+        print("plotbook: %s" % err, file=sys.stderr)
         return 2
-    root = pbcore.find_root(cwd) or os.path.realpath(cwd)
-    if pbcore.git(["rev-parse", "--show-toplevel"], root, check=False).returncode != 0:
-        print("plotbook: %s is not inside a git repository. Create the analysis branch (and its PR) "
-              "first; plotbook commits each turn to it." % root, file=sys.stderr)
-        return 2
+    previous = pbcore.registered_root(cwd, sid)
     created = claim_thread.scaffold(root)
     try:
-        released = claim_thread.claim(root, thread, sid, steal=bool(m.group("steal")))
+        released = claim_thread.claim(root, thread, sid, steal=steal)
     except claim_thread.ClaimRefused as err:
         print("plotbook: %s" % err, file=sys.stderr)
         return 2
+    if previous and previous != root:  # this session moved to another analysis: let its old thread go
+        released = claim_thread.release_session(previous, sid) or released
     record_prompt(root, sid, inp.get("prompt", ""))
     for rel in created:
         pbcore.append_jsonl(pbcore.journal_path(root, sid), {"file": rel})

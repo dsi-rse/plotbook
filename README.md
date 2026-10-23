@@ -7,14 +7,14 @@ This plugin functionally replaces Jupyter/marimo notebooks for data exploration 
 ## Overview
 
 Here's how it works:
-1. You create an empty directory and a git branch in your GitHub repo.
-2. You start Claude Code in that directory.
-3. Use `/plotbook:start A` to start a thread named `A`. The plot viewer opens in a web browser window.
+1. You create a git branch in your GitHub repo.
+2. You start Claude Code in the root of the repo.
+3. Use `/plotbook:start A analysis-dir` to start a thread named `A` whose scripts and plots go in `analysis-dir` (created if it doesn't exist). The plot viewer opens in a web browser window.
 4. You ask for plots and other output to analyze your data.
 5. Those plots and the scripts that made them are named sequentially (`A0001`, `A0002`, etc.) and are browsable in the viewer.
 6. When you reach some sort of conclusion, you draft a comment in the viewer, clicking on plots to add whichever ones are relevant to the conclusion. Pending commits are git-pushed to GitHub with the comment.
 7. GOTO 4.
-8. Open another Claude Code in another terminal and `/plotbook:start B` to ask for more plots in parallel (`B0001`, `B0002`, etc.). Its web viewer opens in another browser tab.
+8. Open another Claude Code in another terminal and `/plotbook:start B analysis-dir` to ask for more plots in parallel (`B0001`, `B0002`, etc.). Its web viewer opens in another browser tab.
 
 In the end, the PR comment thread shows your human-written comments and chosen plots directly, but Claude's detailed output is hidden inside of `🤖 Extra details 🤖` blocks. Additionally, the code used to make the plots is checked in for reproducibility or forensics, as well as the full text of your Claude conversation. (If your repo is public, be careful what you say!)
 
@@ -51,7 +51,7 @@ Drafting a GitHub comment (click to add plots and edit or copy from the `🤖 Ex
 
 ## File layout
 
-Everything goes into the analysis directory that you created, with the following structure:
+Everything goes into the analysis directory that you named in `/plotbook:start`, with the following structure:
 
 ```
 analysis-dir/
@@ -68,7 +68,7 @@ You can use code from other directories, but the plotting scripts in this direct
 
 ## More commands
 
-* `/plotbook:start A` for some label like `A`, `B`, `C`: sets up the subdirectories and tells Claude to adhere to the filename convention.
+* `/plotbook:start A analysis-dir` for some label like `A`, `B`, `C`: sets up the subdirectories in `analysis-dir` and tells Claude to adhere to the filename convention. `analysis-dir` is relative to where Claude Code is running, and it's optional: without it, the analysis directory is the one Claude Code is running in (or the analysis that contains it). So you can also start Claude Code inside the analysis directory and use `/plotbook:start A`. A thread that has been started before can also be resumed with `/plotbook:start A`, for example after `/clear`.
 * `/plotbook:push` starts a draft comment in the web viewer; equivalent to the "Draft comment" button in the web viewer.
 * `/plotbook:repro A0003` reproduces a plot whose prefix is `A0003`.
 
@@ -82,7 +82,7 @@ Only `/plotbook:start` is required.
 ## When something breaks
 
 - If `TRANSCRIPT-SYNC-BROKEN` appears in the analysis root: Claude Code changed its internal transcript format. Your files are still committed. Add the new entry type to the table at the top of `scripts/sync_transcript.py`. The next sync recovers the full transcript and removes the marker.
-- If you see "thread … is already claimed": another live session owns it. If that session crashed, use `/plotbook:start <thread> --steal`.
+- If you see "thread … is already claimed": another live session owns it. If that session crashed, use `/plotbook:start <thread> <analysis-dir> --steal`.
 
 ## Development
 

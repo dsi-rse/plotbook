@@ -64,9 +64,11 @@ def normalized(data):
 def main(argv):
     if len(argv) != 1:
         sys.exit(__doc__.strip().splitlines()[2].strip())
-    root = pbcore.find_root(os.getcwd())
-    if root is None:
-        sys.exit("plotbook-repro: not inside a plotbook analysis")
+    m = re.match(r"^([A-Za-z](?:[A-Za-z_-]*[A-Za-z])?)\d{4}", os.path.basename(argv[0]))
+    try:
+        root = pbcore.tool_root(m.group(1) if m else None)
+    except pbcore.PlotbookError as err:
+        sys.exit("plotbook-repro: %s" % err)
     try:
         script, outputs = resolve(root, argv[0])
     except pbcore.PlotbookError as err:

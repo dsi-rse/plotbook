@@ -44,11 +44,17 @@ class PlotbookError(Exception):
 
 
 def find_root(start):
-    """Nearest ancestor of `start` (inclusive) containing a `.plotbook/` dir, or None."""
+    """Nearest ancestor of `start` (inclusive) containing a `.plotbook/` dir, or None.
+
+    The search stops at the git repository's top level (a directory containing `.git`):
+    an analysis is always inside its repo, and a stray .plotbook/ above it is not one.
+    """
     d = os.path.abspath(start)
     while True:
         if os.path.isdir(os.path.join(d, ".plotbook")):
             return d
+        if os.path.exists(os.path.join(d, ".git")):
+            return None
         parent = os.path.dirname(d)
         if parent == d:
             return None
@@ -293,7 +299,90 @@ def hook_input():
 
 
 def hook_root(inp):
-    return find_root(inp.get("cwd") or os.getcwd())
+    """The analysis this hook call is about: the session's registered one (see register_session),
+    else the analysis containing the session's directory."""
+    cwd = inp.get("cwd") or os.getcwd()
+    return registered_root(cwd, inp.get("session_id")) or find_root(cwd)
+
+
+# ---------------------------------------------------------------- session registry
+# Claude Code may run outside the analysis directory (e.g. at the repo root, with the analysis
+# named in `/plotbook:start T <analysis-dir>`). The registry maps session -> analysis so hooks can
+# find it. It lives in the git common dir: never committed, shared by worktrees, gone with the clone.
+REGISTRY_MAX_AGE = 90 * 86400
+
+
+def registry_dir(start):
+    """<git-common-dir>/plotbook/sessions for the repo containing `start`, or None outside a repo."""
+    d = os.path.abspath(start)
+    while not os.path.isdir(d):  # `start` may not exist yet (a new analysis directory)
+        d = os.path.dirname(d)
+    try:
+        cp = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=d,
+                            capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if cp.returncode != 0 or not cp.stdout.strip():
+        return None
+    return os.path.join(cp.stdout.strip(), "plotbook", "sessions")
+
+
+def register_session(root, session_id, thread):
+    """Record that `session_id` works on `thread` in analysis `root`; prune long-dead entries."""
+    d = registry_dir(root)
+    if d is None or not session_id:
+        return
+    ensure_dir(d)
+    write_json(os.path.join(d, session_id + ".json"),
+               {"root": os.path.realpath(root), "thread": thread, "ts": now_iso()})
+    cutoff = time.time() - REGISTRY_MAX_AGE
+    for name in os.listdir(d):
+        p = os.path.join(d, name)
+        try:
+            if os.path.getmtime(p) < cutoff:
+                os.remove(p)
+        except OSError:
+            pass
+
+
+def registry_entry(start, session_id):
+    d = registry_dir(start) if session_id else None
+    return read_json(os.path.join(d, session_id + ".json")) if d else None
+
+
+def registered_root(start, session_id):
+    """The analysis `session_id` registered, if it still exists."""
+    rec = registry_entry(start, session_id) or {}
+    root = rec.get("root")
+    return root if root and os.path.isdir(os.path.join(root, ".plotbook")) else None
+
+
+def thread_roots(start, thread):
+    """Analyses (in the repo containing `start`) where `thread` has been claimed, per the registry."""
+    d = registry_dir(start)
+    roots = set()
+    for name in sorted(os.listdir(d)) if d and os.path.isdir(d) else []:
+        rec = read_json(os.path.join(d, name)) or {}
+        if rec.get("thread") == thread and rec.get("root") and os.path.isdir(os.path.join(rec["root"], ".plotbook")):
+            roots.add(rec["root"])
+    return sorted(roots)
+
+
+def tool_root(thread=None, start=None):
+    """Analysis root for a CLI tool run from `start` (default: cwd): the analysis containing it,
+    else the one analysis in this repo where `thread` was claimed. PlotbookError otherwise."""
+    start = start or os.getcwd()
+    root = find_root(start)
+    if root is not None:
+        return root
+    roots = thread_roots(start, thread) if thread else []
+    if len(roots) == 1:
+        return roots[0]
+    if len(roots) > 1:
+        raise PlotbookError("thread %r exists in several analyses (%s); run this from inside one of them"
+                            % (thread, ", ".join(roots)))
+    raise PlotbookError("not inside a plotbook analysis (no .plotbook/ above %s)%s"
+                        % (start, "" if thread is None else ", and thread %r isn't claimed in this repo" % thread))
 
 
 def now_iso():
