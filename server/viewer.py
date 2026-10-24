@@ -382,35 +382,49 @@ PAGE_HEAD = """<!doctype html><html><head><meta charset="utf-8"><title>__TITLE__
    so there is never a page-level scrollbar (100dvh where supported, 100vh otherwise). */
 html, body { height:100%; }
 body { display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; }
-body > header, #nav, body > .strip { flex:0 0 auto; }
+body > header, #nav { flex:0 0 auto; }
 body { margin:0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color:var(--fg); background:var(--bg); }
 header { display:flex; gap:1em; align-items:center; padding:.5em 1em; border-bottom:1px solid var(--line); }
 header h1 { font-size:1.1em; margin:0; } header .path { color:var(--muted); font-size:.85em; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 a { color:var(--accent); } button { font:inherit; padding:.3em .8em; border:1px solid var(--line); border-radius:6px; background:#f6f8fa; cursor:pointer; }
 button.primary { background:#1f883d; color:#fff; border-color:#1a7f37; } button:disabled { opacity:.5; cursor:default; }
 main.index { padding:1em 2em; flex:1 1 auto; overflow:auto; } .path { color:var(--muted); }
-#stage { flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; padding:.5em; position:relative; }
+#stage { flex:1 1 0; min-height:0; display:flex; align-items:center; justify-content:center; padding:.5em; position:relative; }
 #stage img { width:100%; height:100%; object-fit:contain; background:#fff; }
 #stage .card, .tray .card { border:1px solid var(--line); border-radius:8px; padding:1.5em; text-align:center; }
 #nav { display:flex; gap:.5em; align-items:center; justify-content:center; padding:.25em; }
 #nav .name { font-family: ui-monospace, monospace; min-width:24em; text-align:center; }
-.strip { display:flex; gap:6px; overflow-x:auto; overflow-y:hidden; padding:6px 1em 10px; border-top:1px solid var(--line); align-items:stretch; overscroll-behavior-x:contain; }
-.thumb { flex:0 0 auto; width:120px; border:2px solid transparent; border-radius:4px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:4px; padding:2px 0 5px; background:#fff; }
-.thumb img { width:116px; height:72px; object-fit:contain; }
-.thumb .label { font: 10px/1.3 ui-monospace, monospace; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:116px; text-align:center; }
+.strip { display:flex; gap:6px; overflow-x:auto; overflow-y:hidden; padding:6px 1em 10px; border-top:1px solid var(--line); align-items:flex-start; overscroll-behavior-x:contain; }
+/* Default size = minimum size (user's choice): drag to the limit to restore it. */
+body > .strip { flex:0 0 133px; min-height:133px; }
+/* Thumbnails scale with the strip's height: fitThumbs() sets --img-h from it (default 72px). */
+.thumb { --img-w: calc(var(--img-h, 72px) * 116 / 72); flex:0 0 auto; width:calc(var(--img-w) + 4px); border:2px solid transparent; border-radius:4px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:4px; padding:2px 0 5px; background:#fff; }
+.thumb img { width:var(--img-w); height:var(--img-h, 72px); object-fit:contain; }
+.thumb .label { font: 10px/1.3 ui-monospace, monospace; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:var(--img-w); text-align:center; }
 .thumb.current { border-color:var(--accent); }
-.thumb .ext { width:116px; height:72px; display:flex; align-items:center; justify-content:center; font:600 13px ui-monospace, monospace; color:var(--muted); }
+.thumb .ext { width:var(--img-w); height:var(--img-h, 72px); display:flex; align-items:center; justify-content:center; font:600 13px ui-monospace, monospace; color:var(--muted); }
+.divider { align-self:stretch; }
+/* Gaps between panes are drag handles: nothing drawn, only the cursor changes (see makeResizable). */
+.gutter { flex:0 0 8px; touch-action:none; }
+.gutter.col { cursor:col-resize; } .gutter.row { cursor:row-resize; }
+body > .gutter.row { flex:0 0 6px; margin-bottom:-6px; position:relative; z-index:1; }  /* over the strip's top padding */
+body.resizing, body.resizing * { user-select:none; }
+body.resizing.col, body.resizing.col * { cursor:col-resize !important; } body.resizing.row, body.resizing.row * { cursor:row-resize !important; }
 .divider { flex:0 0 auto; display:flex; align-items:center; border-left:3px dashed #cf222e; margin:0 4px; padding-left:2px; }
 .divider.past { border-left-color:#afb8c1; margin:0 2px; padding-left:0; }
 .divider span { writing-mode:vertical-rl; transform:rotate(180deg); font-size:10px; line-height:1; color:#cf222e; white-space:nowrap; }
-.draft { flex:1 1 auto; min-height:0; display:grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) auto auto; gap:8px; padding:8px; }
-.draft textarea { width:100%; height:100%; font: 13px/1.5 ui-monospace, monospace; padding:8px; border:1px solid var(--line); border-radius:6px; resize:none; }
-.pane { display:flex; flex-direction:column; min-height:0; } .pane h2 { font-size:.85em; margin:0 0 4px; color:var(--muted); display:flex; gap:.5em; align-items:center; }
-.preview { overflow:auto; border:1px solid var(--line); border-radius:6px; padding:16px; height:100%; }
+/* Draft page: [comment | preview] over Extra details over the thumbnail tray. Only the top row
+   flexes; the comment's width share and the lower panes' heights are set by dragging the gaps. */
+.draft { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; padding:8px; }
+.draft .top { flex:1 1 0; min-height:120px; display:flex; }
+#commentpane { flex:0 0 50%; } #previewpane { flex:1 1 0; }
+.draft textarea { width:100%; flex:1 1 auto; min-height:0; font: 13px/1.5 ui-monospace, monospace; padding:8px; border:1px solid var(--line); border-radius:6px; resize:none; }
+.pane { display:flex; flex-direction:column; min-height:0; min-width:0; } .pane h2 { font-size:.85em; margin:0 0 4px; color:var(--muted); display:flex; gap:.5em; align-items:center; }
+/* Wide content (tables, code, math) scrolls inside the preview; it never widens the pane. */
+.preview { flex:1 1 auto; min-height:0; overflow:auto; border:1px solid var(--line); border-radius:6px; padding:16px; }
 .preview img { max-width:100%; }
-.addendum { grid-column: 1 / 3; border:2px solid #8250df; border-radius:8px; padding:6px; background:#fbf8ff; }
-.addendum textarea { height:150px; }
-.tray { grid-column: 1 / 3; } .tray .strip { border:1px solid var(--line); border-radius:6px; }
+.addendum { flex:0 0 190px; min-height:190px; border:2px solid #8250df; border-radius:8px; padding:6px; background:#fbf8ff; }
+.tray { flex:0 0 134px; min-height:134px; display:flex; } .tray .strip { flex:1 1 auto; min-width:0; border:1px solid var(--line); border-radius:6px; }
 .status { font-size:.85em; color:var(--muted); }
 dialog { max-width:760px; width:90vw; border:1px solid var(--line); border-radius:8px; }
 dialog pre { max-height:40vh; overflow:auto; background:#f6f8fa; padding:8px; font-size:12px; white-space:pre-wrap; }
@@ -430,6 +444,7 @@ THREAD_HTML = """
 <div id="stage"></div>
 <div id="nav"><button id="prev" title="previous (←)">◀</button><span class="name" id="name"></span><button id="next" title="next (→)">▶</button>
 <button id="latest" title="jump to latest (End)">latest ⇥</button></div>
+<div class="gutter row" id="stripgap"></div>
 <div class="strip" id="strip"></div>
 <script>const THREAD = "__THREAD__";</script>
 """
@@ -473,6 +488,56 @@ function wheelToHorizontal(el) {
   }, {passive: false});
 }
 document.querySelectorAll(".strip").forEach(wheelToHorizontal);
+// Thumbnails fill the strip's height. Computed from the border box minus a fixed scrollbar
+// allowance, so a scrollbar appearing (thumbs got wider) can't feed back into the size.
+const SCROLLBAR_H = (() => {
+  const d = document.createElement("div");
+  d.style.cssText = "position:absolute;top:-999px;width:50px;height:50px;overflow-x:scroll";
+  document.body.appendChild(d); const h = d.offsetHeight - d.clientHeight; d.remove(); return h;
+})();
+const THUMB_EXTRA = 2 * 2 + 2 + 5 + 4 + 13;  // .thumb border, padding, gap, label line
+function fitThumbs(strip) {
+  new ResizeObserver(() => {
+    const cs = getComputedStyle(strip);
+    const box = ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth"].reduce((t, k) => t + parseFloat(cs[k]), 0);
+    strip.style.setProperty("--img-h", Math.max(16, strip.offsetHeight - box - SCROLLBAR_H - THUMB_EXTRA) + "px");
+  }).observe(strip, {box: "border-box"});
+}
+document.querySelectorAll(".strip").forEach(fitThumbs);
+// Draggable gaps. `target` is the pane whose size the gap sets (flex-basis, in px or as a % of
+// `container`); `flex` is the neighbour that absorbs the change and must keep `flexMin` px.
+// `sign` is +1 if dragging right/down grows the target. Sizes persist in localStorage;
+// double-click a gap to restore the default.
+function makeResizable(gutter, o) {
+  const axis = gutter.classList.contains("col") ? "x" : "y", dim = axis === "x" ? "width" : "height";
+  const key = "plotbook.size." + o.key;
+  const apply = v => { o.target.style.flexBasis = v + o.unit; };
+  const saved = parseFloat(localStorage.getItem(key)); if (!isNaN(saved)) apply(saved);
+  gutter.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    try { gutter.setPointerCapture(e.pointerId); } catch (_) { /* synthetic events have no live pointer */ }
+    document.body.classList.add("resizing", axis === "x" ? "col" : "row");
+    const start = axis === "x" ? e.clientX : e.clientY;
+    const size0 = o.target.getBoundingClientRect()[dim], flex0 = o.flex.getBoundingClientRect()[dim];
+    const max = Math.max(o.min, size0 + flex0 - o.flexMin);
+    let value = null;
+    const move = ev => {
+      const px = Math.min(max, Math.max(o.min, size0 + o.sign * ((axis === "x" ? ev.clientX : ev.clientY) - start)));
+      value = o.unit === "%" ? px / o.container.getBoundingClientRect()[dim] * 100 : px;
+      apply(value);
+    };
+    const up = () => {
+      gutter.removeEventListener("pointermove", move); gutter.removeEventListener("pointerup", up);
+      gutter.removeEventListener("pointercancel", up);
+      document.body.classList.remove("resizing", "col", "row");
+      if (value !== null) localStorage.setItem(key, String(value));
+    };
+    gutter.addEventListener("pointermove", move); gutter.addEventListener("pointerup", up);
+    gutter.addEventListener("pointercancel", up);
+  });
+  gutter.addEventListener("dblclick", () => { localStorage.removeItem(key); o.target.style.flexBasis = ""; });
+}
 function onEvents(handler) {
   const es = new EventSource("/events");
   es.onmessage = ev => handler(JSON.parse(ev.data));
@@ -521,6 +586,8 @@ async function refresh(initial) {
   else { const j = arts.findIndex(a => a.name === curName); idx = j >= 0 ? j : Math.min(idx, arts.length - 1); }
   render();
 }
+makeResizable(document.getElementById("stripgap"), {key: "thread.strip", target: document.getElementById("strip"),
+  flex: document.getElementById("stage"), flexMin: 120, sign: -1, min: 133, unit: "px"});
 document.getElementById("prev").onclick = () => go(idx - 1);
 document.getElementById("next").onclick = () => go(idx + 1);
 document.getElementById("latest").onclick = () => go(arts.length - 1);
@@ -538,13 +605,18 @@ DRAFT_HTML = """
 <header><h1>plotbook · __THREAD__ · draft comment</h1><span class="path" id="path"></span><a id="pr" target="_blank"></a>
 <a href="/t/__THREAD__">back to thread</a><button class="primary" id="publish">Publish</button></header>
 <div class="draft">
-  <div class="pane"><h2>Your comment (markdown) <span class="status" id="saved"></span></h2>
+  <div class="top" id="top">
+  <div class="pane" id="commentpane"><h2>Your comment (markdown) <span class="status" id="saved"></span></h2>
     <textarea id="draft" placeholder="Write the narrative here. Click a thumbnail below to insert that plot at the cursor."></textarea></div>
-  <div class="pane"><h2>Preview <span class="status" id="engine"></span></h2><div class="preview markdown-body" id="preview"></div></div>
-  <div class="addendum pane"><h2>🤖 Extra details 🤖 — published verbatim inside a collapsed &lt;details&gt; block (empty = omitted)
+  <div class="gutter col" id="colgap"></div>
+  <div class="pane" id="previewpane"><h2>Preview <span class="status" id="engine"></span></h2><div class="preview markdown-body" id="preview"></div></div>
+  </div>
+  <div class="gutter row" id="addgap"></div>
+  <div class="addendum pane" id="addpane"><h2>🤖 Extra details 🤖 — published verbatim inside a collapsed &lt;details&gt; block (empty = omitted)
     <span class="status" id="addstatus"></span><button id="regen">Regenerate</button></h2>
     <textarea id="addendum" placeholder="(generating…)"></textarea></div>
-  <div class="tray"><div class="strip" id="tray"></div></div>
+  <div class="gutter row" id="traygap"></div>
+  <div class="tray" id="traypane"><div class="strip" id="tray"></div></div>
 </div>
 <dialog id="logdlg"><h3 id="logtitle">Publishing…</h3><pre id="log"></pre><p id="result"></p><p><button id="closelog" disabled>OK</button></p></dialog>
 <dialog id="prdlg"><form id="prform" method="dialog"><h3>Open a pull request</h3><p id="prwhy"></p>
@@ -562,6 +634,11 @@ DRAFT_HTML = """
 DRAFT_JS = r"""
 <script>
 const draft = document.getElementById("draft"), addendum = document.getElementById("addendum");
+const $ = id => document.getElementById(id);
+makeResizable($("colgap"), {key: "draft.comment", target: $("commentpane"), flex: $("previewpane"), flexMin: 200,
+  sign: 1, min: 200, unit: "%", container: $("top")});
+makeResizable($("addgap"), {key: "draft.addendum", target: $("addpane"), flex: $("top"), flexMin: 120, sign: -1, min: 190, unit: "px"});
+makeResizable($("traygap"), {key: "draft.tray", target: $("traypane"), flex: $("top"), flexMin: 120, sign: -1, min: 134, unit: "px"});
 let arts = [], through = 0, earlier = [], timers = {};
 function debounce(key, ms, fn) { clearTimeout(timers[key]); timers[key] = setTimeout(fn, ms); }
 async function save(kind, text) {
