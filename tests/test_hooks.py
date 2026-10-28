@@ -156,6 +156,29 @@ def test_unknown_entry_type_is_loud_but_files_commit(new_session, repo):
     assert "analysis/TRANSCRIPT-SYNC-BROKEN" not in files
 
 
+def test_tools_used_entries_are_dropped_and_recover_a_broken_sync(new_session):
+    # Claude Code 2.1.3xx added {"type": "tools-used", "tools": [...]} entries. Old transcripts lack them;
+    # both formats must filter identically, and a marker left by an older plotbook clears on the next sync.
+    import sync_transcript
+
+    s = new_session()
+    s.prompt("/plotbook:start primary")
+    s.stop()
+    s.prompt("plot")
+    make_plot(s, "primary", 1)
+    old_format = open(s.transcript).readlines()
+    s.append({"type": "tools-used", "tools": ["Write", "Bash"], "sessionId": s.id})
+    new_format = open(s.transcript).readlines()
+    assert sync_transcript.filter_lines(new_format, s.root) == sync_transcript.filter_lines(old_format, s.root)
+    marker = os.path.join(s.root, "TRANSCRIPT-SYNC-BROKEN")
+    open(marker, "w").write("error: line 33: unknown entry type 'tools-used'\n")
+    r = s.stop()
+    assert r.returncode == 0, r.stderr
+    assert not os.path.exists(marker)
+    out = open(os.path.join(s.root, pbcore.transcript_relpath("primary", s.id))).read()
+    assert "plot" in out and "tools-used" not in out
+
+
 def test_unknown_block_type_is_loud(new_session):
     s = new_session()
     s.prompt("/plotbook:start primary")

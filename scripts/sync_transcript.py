@@ -47,6 +47,7 @@ ENTRY_TYPES = {
     "api-request": "drop",
     "api-request-blob": "drop",
     "api-request-shape": "drop",
+    "tools-used": "drop",  # {"tools": [names...]}: which tools a turn used (Claude Code 2.1.3xx, 2026-10)
 }
 # Content-block "type" inside message.content lists, per role -> "keep" / "drop".
 BLOCK_TYPES = {

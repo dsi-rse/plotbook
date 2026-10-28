@@ -22,3 +22,6 @@ Verified with a throwaway plugin run via `claude -p "/x:start primary" --plugin-
 - CLI gotcha: `--allowedTools` is variadic and swallows a trailing prompt; put the prompt first.
 - Transcript JSONL has ~25 top-level entry types (attachment, api-request*, atis-latch, ...).
   Attachments include the user's email and the system prompt; always drop them.
+- 2026-10-28: a new top-level entry type `tools-used` ({"tools": [tool names], "sessionId"}) appeared, roughly once per
+  turn. Added to ENTRY_TYPES as "drop". When fixing a TRANSCRIPT-SYNC-BROKEN, scan every ~/.claude/projects/*/*.jsonl
+  for unknown types at once (that scan found only this one), not just the failing file.
