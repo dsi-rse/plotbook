@@ -168,8 +168,8 @@ backup; doing so must not affect what the next comment considers "new", which is
 the new-since-last-comment boundary derives from the publish manifest and never from
 push state.
 
-A structural decision sits underneath all of this: **the model never runs git or gh
-directly.** All git mutation lives in fixed, reviewed scripts invoked by hooks and by
+A structural decision sits underneath all of this: **the model never writes with git or
+gh directly** (read-only use is fine). All git mutation lives in fixed, reviewed scripts invoked by hooks and by
 the publish pipeline. This is partly safety (nothing is committed or published except
 through one deterministic ritual) and partly compatibility: Claude Code permission
 deny-rules merge across all settings scopes and cannot be overridden by any allow

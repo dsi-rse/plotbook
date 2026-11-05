@@ -58,7 +58,9 @@ exec(compile(open(_f := "scripts/shared_0007.py").read(), _f, "exec"))
 - `shared` is reserved; it is never a thread name.
 
 ## Git: hooks own it all
-- **Never run `git` or `gh`.** Not even read-only. The Stop hook commits each file-changing turn's files
+- **Never write with `git` or `gh`**: no add, commit, push, branch changes, PR creation, or comments.
+  Read-only use (`git log`, `git diff`, `gh pr view`, `gh issue list`, ...) is fine where the user's
+  permissions allow it. The Stop hook commits each file-changing turn's files
   and transcript automatically. Pushing and PR comments happen only when the user presses Publish
   in the viewer (`/plotbook:push` opens it).
 - **At the end of every turn that created or changed files**, run
